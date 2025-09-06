@@ -1,0 +1,128 @@
+// Full prototype logic extracted from prototype.html for 1:1 parity.
+// Self-invoking to avoid leaking globals (except intended demo vars if needed).
+(()=>{
+	/********************* Demo data & state *********************/
+	const users = [
+		{id:'u1', name:'Ana'},
+		{id:'u2', name:'Ben'},
+		{id:'u3', name:'Chen'},
+		{id:'u4', name:'Devi'},
+		{id:'u5', name:'Eli'}
+	];
+	let currentUserId = users[0].id;
+
+	const initialBlocks = [
+		{ id:'h_purpose', type:'h2', text:'Purpose', parent:null },
+		{ id:'p_purpose', type:'p',  text:'These bylaws guide the operation of the Willow Creek Community Garden and ensure fair access, safety, and shared stewardship.', parent:'h_purpose' },
+		{ id:'h_meet', type:'h2', text:'Meetings', parent:null },
+		{ id:'p_meet', type:'p',  text:'The HOA meets monthly on the first Saturday at 10:00 AM at the tool shed. Minutes are posted to the bulletin board within 7 days.', parent:'h_meet' },
+		{ id:'h_quorum', type:'h2', text:'Quorum', parent:null },
+		{ id:'p_quorum', type:'p',  text:'Quorum is established when at least 25% of plot holders are present. Votes pass with a simple majority of those present.', parent:'h_quorum' },
+		{ id:'h_maint', type:'h2', text:'Plot Maintenance', parent:null },
+		{ id:'p_maint', type:'p',  text:'Gardeners must weed, water, and maintain plots weekly. Neglected plots may be reassigned after two warnings.', parent:'h_maint' },
+		{ id:'h_tools', type:'h2', text:'Tools & Safety', parent:null },
+		{ id:'p_tools', type:'p',  text:'Common tools are shared on a first-come basis. Return tools clean. Children must be supervised at all times.', parent:'h_tools' }
+	];
+
+	let entry = { id:'e1', title:'Trunk v1', version:1, votes:12, blocks: structuredClone(initialBlocks) };
+	let patches = [];
+	let draft = { ops: [], opSeq: 1 };
+
+	function el(tag, attrs={}, ...children){
+		const e=document.createElement(tag);
+		for(const [k,v] of Object.entries(attrs)){
+			if(k==='class') e.className=v;
+			else if(k==='html') e.innerHTML=v;
+			else if(k.startsWith('on') && typeof v==='function') e.addEventListener(k.slice(2), v);
+			else if(typeof v === 'boolean') { if(v){ e.setAttribute(k,''); if(k in e) e[k]=true; } else { e.removeAttribute(k); if(k in e) e[k]=false; } }
+			else e.setAttribute(k,v);
+		}
+		for(const c of children){ if(c==null) continue; e.append(c.nodeType?c:document.createTextNode(c)); }
+		return e;
+	}
+
+	function outline(blocks){ return blocks.map(b=> `${b.type==='h2'?'##':'‣'} ${b.text}`).join('\n'); }
+	function outlineDiff(before, after){
+		const beforeIds = new Set(before.map(b=>b.id));
+		const afterIds  = new Set(after.map(b=>b.id));
+		const moved = new Set();
+		const updated = new Set();
+		const idxBefore = new Map(before.map((b,i)=>[b.id, i]));
+		const idxAfter  = new Map(after.map((b,i)=>[b.id, i]));
+		before.forEach(b=>{
+			if(!afterIds.has(b.id)) return;
+			const a = after[idxAfter.get(b.id)];
+			if(a.text !== b.text) updated.add(b.id);
+			if(idxBefore.get(b.id) !== idxAfter.get(b.id)) moved.add(b.id);
+		});
+		const linesBefore = before.map(b=>{
+			if(!afterIds.has(b.id)) return `- ${b.type==='h2'?'##':'‣'} ${b.text}`;
+			if(updated.has(b.id)) return `~ ${b.type==='h2'?'##':'‣'} ${b.text}`;
+			if(moved.has(b.id))   return `↔ ${b.type==='h2'?'##':'‣'} ${b.text}`;
+			return `  ${b.type==='h2'?'##':'‣'} ${b.text}`;
+		}).join('\n');
+		const linesAfter = after.map(b=>{
+			if(!beforeIds.has(b.id)) return `+ ${b.type==='h2'?'##':'‣'} ${b.text}`;
+			if(updated.has(b.id)) return `~ ${b.type==='h2'?'##':'‣'} ${b.text}`;
+			if(moved.has(b.id))   return `↔ ${b.type==='h2'?'##':'‣'} ${b.text}`;
+			return `  ${b.type==='h2'?'##':'‣'} ${b.text}`;
+		}).join('\n');
+		return { before: linesBefore, after: linesAfter };
+	}
+	function cloneBlocks(blocks){ return blocks.map(b=>({...b})); }
+	function findIndex(blocks, id){ return blocks.findIndex(b=>b.id===id); }
+	function applyOps(blocks, ops){
+		const out = cloneBlocks(blocks);
+		const ensureNewId = (prefix)=> `${prefix}_${Date.now()}_${Math.floor(Math.random()*1e5)}`;
+		for(const op of ops){
+			if(op.type==='UPDATE_TEXT'){
+				const i = findIndex(out, op.block_id); if(i!==-1) out[i].text = op.new_text;
+			} else if(op.type==='INSERT_BLOCK'){
+				const newBlock = { id: op.new_block.id || ensureNewId('new'), type: op.new_block.type, text: op.new_block.text, parent: op.new_block.parent||null };
+				const idx = op.after_id? findIndex(out, op.after_id) : -1; out.splice(idx+1, 0, newBlock);
+			} else if(op.type==='DELETE_BLOCK'){
+				const i = findIndex(out, op.block_id); if(i!==-1) out.splice(i,1);
+			} else if(op.type==='MOVE_BLOCK'){
+				const i = findIndex(out, op.block_id); if(i!==-1){ const blk = out.splice(i,1)[0]; const j = op.after_id? findIndex(out, op.after_id) : -1; blk.parent = op.new_parent ?? blk.parent; out.splice(j+1,0,blk); }
+			}
+		}
+		return out;
+	}
+	function targetedSets(ops){ const blocks = new Set(); const anchors = new Set(); ops.forEach(o=>{ if(o.block_id) blocks.add(o.block_id); if(o.after_id) anchors.add('after:'+o.after_id); }); return { blocks:[...blocks], anchors:[...anchors] }; }
+	function removeOpBySeq(ops, seq){ return ops.filter(o=> o.seq !== seq); }
+	function removeOp(seq){ draft.ops = removeOpBySeq(draft.ops, seq); renderComposer(); }
+	function isPassing(p){ const yes = Object.values(p.votes).filter(v=>v>0).length; return (yes/users.length) >= 0.4; }
+	function applyMergeCore(p){ entry.blocks = applyOps(entry.blocks, p.ops_json); entry.version += 1; const up = Object.values(p.votes).filter(v=>v>0).length; const down = Object.values(p.votes).filter(v=>v<0).length; const patchScore = up - down; entry.votes = Math.max(entry.votes, patchScore); const overlappingIds = new Set(p.overlaps||[]); patches.forEach(q=>{ if(q.id!==p.id && overlappingIds.has(q.id)) q.status='needs_update'; }); p.status='merged'; p.merged_at = Date.now(); logHistory(`Merged Patch #${p.id} by ${userName(p.authorId)} (version now ${entry.version})`); }
+	function autoMergeTick(){ let mergedCount = 0; for(const p of patches){ if(p.status!=='merged' && isPassing(p)){ applyMergeCore(p); mergedCount++; } } if(mergedCount>0){ renderEntry(); } }
+	function simulateMerge(p){ applyMergeCore(p); renderEntry(); renderPatches(); }
+	let openMenuBlockId = null; const ctxMenu = document.getElementById('ctxMenu');
+	function openMenuForBlock(blockId, anchorEl){ closeMenu(); openMenuBlockId = blockId; const blockEl = document.querySelector(`[data-block-id="${blockId}"]`); blockEl && blockEl.classList.add('active'); ctxMenu.innerHTML=''; const add = (label, icon, handler)=> ctxMenu.append(el('div',{class:'ctx-item', role:'menuitem', onclick:(ev)=>{ev.stopPropagation(); handler(); closeMenu();}}, el('span',{class:'mini'}, icon), el('div',{}, label))); add('Edit text', '✏', ()=>stageUpdate(blockId)); add('Insert heading above', '＋', ()=>stageInsert(blockId,'h2','above')); add('Insert paragraph below', '＋', ()=>stageInsert(blockId,'p','below')); ctxMenu.append(el('div',{class:'ctx-hr'})); add('Move up', '↥', ()=>stageMove(blockId,'up')); add('Move down', '↧', ()=>stageMove(blockId,'down')); ctxMenu.append(el('div',{class:'ctx-hr'})); add('Delete block', '🗑', ()=>stageDelete(blockId)); const r = anchorEl.getBoundingClientRect(); const pad=6; const top=Math.min(window.innerHeight-10, r.bottom+pad); const left=Math.min(window.innerWidth-220, r.left-10); ctxMenu.style.top=top+'px'; ctxMenu.style.left=left+'px'; ctxMenu.style.display='block'; ctxMenu.setAttribute('aria-hidden','false'); setTimeout(()=>{ document.addEventListener('click', handleDocClick, { once:true }); },0); }
+	function handleDocClick(ev){ if(!ctxMenu.contains(ev.target)) closeMenu(); }
+	window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeMenu(); }); window.addEventListener('scroll', ()=> closeMenu(), { passive:true });
+	function closeMenu(){ if(openMenuBlockId){ const blockEl = document.querySelector(`[data-block-id="${openMenuBlockId}"]`); blockEl && blockEl.classList.remove('active'); } openMenuBlockId=null; ctxMenu.style.display='none'; ctxMenu.setAttribute('aria-hidden','true'); ctxMenu.innerHTML=''; }
+	function renderEntry(){ const cont = document.getElementById('entryBlocks'); cont.innerHTML=''; entry.blocks.forEach((b)=>{ const node=el('div',{class:'block','data-block-id':b.id}); const gutter=el('div',{class:'gutter'}, el('span',{class:'handle', title:(b.type==='h2'?`Section: ${b.text}`:`Paragraph`)}, b.type==='h2'?'§':'¶'), el('button',{class:'icon-btn', title:'Actions', onclick:(ev)=>{ ev.stopPropagation(); openMenuForBlock(b.id, ev.currentTarget); }}, '⋯')); const content=el('div',{}, b.type==='h2'? el('h2',{}, b.text) : el('p',{}, b.text)); node.append(gutter, content); cont.append(node); }); document.getElementById('entryVersion').textContent = entry.version; document.getElementById('entryVotes').textContent = entry.votes; }
+	function renderComposer(){ const area=document.getElementById('composerArea'); area.innerHTML=''; if(draft.ops.length===0){ area.append(el('div',{class:'help'},'No ops staged. Use block actions to add edits, inserts, deletes, or moves.')); } else { draft.ops.forEach(op=>{ const row=el('div',{class:'stack'}); const head=el('div',{class:'row',style:'justify-content:space-between'}, el('div',{}, el('span',{class:'tag'}, op.type), el('span',{class:'mini muted'}, `#${op.seq}`)), el('div',{}, el('button',{class:'ghost mini', onclick:()=>removeOp(op.seq)}, 'Remove'))); row.append(head); if(op.type==='UPDATE_TEXT'){ const b = entry.blocks.find(x=>x.id===op.block_id); row.append(el('div',{class:'label'}, `Edit block ${shortId(op.block_id)} (${b?.type||'?'})`)); const ta=el('textarea',{class:'textarea'}); ta.value=op.new_text; ta.addEventListener('input',()=>{op.new_text=ta.value; refreshAffects();}); row.append(ta); } if(op.type==='INSERT_BLOCK'){ row.append(el('div',{class:'label'}, `Insert ${op.new_block.type} after ${shortId(op.after_id)||'start'}`)); const ta=el('textarea',{class:'textarea'}); ta.value=op.new_block.text; ta.addEventListener('input',()=>{op.new_block.text=ta.value; refreshAffects();}); row.append(ta); } if(op.type==='DELETE_BLOCK'){ const b = entry.blocks.find(x=>x.id===op.block_id); row.append(el('div',{class:'label'}, `Delete block ${shortId(op.block_id)} (${b?.type||'?'})`)); } if(op.type==='MOVE_BLOCK'){ row.append(el('div',{class:'label'}, `Move ${shortId(op.block_id)} after ${shortId(op.after_id)||'start'}`)); const controls=el('div',{class:'row'}, el('button',{class:'ghost mini', onclick:()=>{ shiftAnchor(op,-1); }}, '◀ move anchor up'), el('button',{class:'ghost mini', onclick:()=>{ shiftAnchor(op,+1); }}, 'move anchor down ▶')); row.append(controls); } area.append(row); area.append(el('div',{class:'sep'})); }); } document.getElementById('btnPublish').disabled = draft.ops.length===0; refreshAffects(); }
+	function shiftAnchor(op, delta){ const idx = op.after_id? findIndex(entry.blocks, op.after_id) : -1; let newIdx=Math.max(-1, Math.min(entry.blocks.length-1, idx+delta)); op.after_id = newIdx>=0? entry.blocks[newIdx].id : null; renderComposer(); }
+	function shortId(id){ return id? id.replace(/[a-z_]+/, '') || id.slice(-4) : '∅'; }
+	function stageUpdate(blockId){ const exists = draft.ops.find(o=> o.type==='UPDATE_TEXT' && o.block_id===blockId); const text = entry.blocks.find(b=>b.id===blockId)?.text || ''; if(exists){ alert('Update already staged for this block.'); return; } draft.ops.push({ seq:draft.opSeq++, type:'UPDATE_TEXT', block_id:blockId, new_text:text }); renderComposer(); }
+	function stageInsert(anchorId, type, where){ let after_id = (where==='below')? anchorId : null; if(where==='above'){ const idx=findIndex(entry.blocks, anchorId); after_id = idx>0? entry.blocks[idx-1].id : null; } draft.ops.push({ seq:draft.opSeq++, type:'INSERT_BLOCK', after_id, new_block:{ id:null, type, text:'New '+(type==='h2'?'heading':'paragraph'), parent:null } }); renderComposer(); }
+	function stageDelete(blockId){ draft.ops.push({ seq:draft.opSeq++, type:'DELETE_BLOCK', block_id:blockId }); renderComposer(); }
+	function stageMove(blockId, dir){ const curIdx=findIndex(entry.blocks, blockId); const anchorIdx = dir==='up'? Math.max(-1, curIdx-2) : Math.min(entry.blocks.length-1, curIdx); const after_id = anchorIdx>=0? entry.blocks[anchorIdx].id : null; draft.ops.push({ seq:draft.opSeq++, type:'MOVE_BLOCK', block_id:blockId, after_id }); renderComposer(); }
+	document.getElementById('btnClear').addEventListener('click', ()=>{ draft.ops=[]; renderComposer(); });
+	document.getElementById('btnPublish').addEventListener('click', ()=>{ const ops = JSON.parse(JSON.stringify(draft.ops)); const afterBlocks = applyOps(entry.blocks, ops); const diff = outlineDiff(entry.blocks, afterBlocks); const tsets = targetedSets(ops); const patch = { id: patches.length+1, targetEntryId: entry.id, authorId: currentUserId, summary: document.getElementById('patchSummary').value.trim()||`Patch #${patches.length+1}`, ops_json: ops, affected_blocks: tsets.blocks, anchors: tsets.anchors, before_outline: diff.before, after_outline: diff.after, votes: { [currentUserId]: 1 }, status: 'published' }; patches.push(patch); recomputeOverlaps(); draft.ops=[]; document.getElementById('patchSummary').value=''; renderComposer(); renderPatches(); });
+	function refreshAffects(){ const tags=document.getElementById('affectsTags'); tags.innerHTML=''; const ids=new Set(); draft.ops.forEach(o=>{ if(o.block_id) ids.add(o.block_id); }); [...ids].forEach(id=>{ const b=entry.blocks.find(x=>x.id===id); const label = b? (b.type==='h2'? `§ ${b.text}` : `¶ ${b.text.slice(0,30)}…`) : shortId(id); tags.append(el('span',{class:'tag'}, label)); }); }
+	function recomputeOverlaps(){ for(const p of patches){ p.overlaps = patches.filter(q=> q.id!==p.id && q.targetEntryId===p.targetEntryId && (intersectsArr(p.affected_blocks, q.affected_blocks) || intersectsArr(p.anchors, q.anchors))).map(q=>q.id); p.competing = p.overlaps.length>0; } }
+	function intersectsArr(a,b){ return (a||[]).some(x=> (b||[]).includes(x)); }
+	function renderPatches(){ autoMergeTick(); const list=document.getElementById('patchList'); list.innerHTML=''; const history=document.getElementById('historyList'); if(history) history.innerHTML=''; if(patches.length===0){ list.append(el('div',{class:'help'},'No published patches yet.')); return; } for(const p of patches){ if(p.status==='merged') continue; const yes=Object.values(p.votes).filter(v=>v>0).length; const no=Object.values(p.votes).filter(v=>v<0).length; const approval=yes/users.length; const passing=approval>=0.4; const voted=p.votes[currentUserId]||0; const statusPills=[]; if(p.competing) statusPills.push(el('span',{class:'pill yellow'}, 'overlaps')); statusPills.push(el('span',{class:'pill'}, `${yes} yes / ${no} no`)); if(passing) statusPills.push(el('span',{class:'pill green'}, 'merge-ready')); const card=el('div',{class:'patch-card'+(p.competing?' overlap':'')}, el('div',{class:'row',style:'justify-content:space-between;'}, el('div',{}, el('strong',{}, p.summary), el('div',{class:'mini muted'}, `Ops: ${p.ops_json.length} · Affects ${p.affected_blocks.length} blocks`)), el('div',{class:'row'}, ...statusPills)), el('div',{class:'diff'}, el('div',{}, el('div',{class:'label'},'Outline (before)'), el('pre',{class:'outline',html:decorateOutline(p.before_outline,true)})), el('div',{}, el('div',{class:'label'},'Outline (after)'), el('pre',{class:'outline',html:decorateOutline(p.after_outline,false)}))), el('div',{class:'footer'}, el('div',{class:'vote'}, el('button',{class:(voted===1?'good':''), onclick:()=>{ vote(p.id, +1); }}, '▲'), el('span',{class:'score'}, yes-no), el('button',{class:(voted===-1?'bad':''), onclick:()=>{ vote(p.id, -1); }}, '▼'), el('span',{class:'mini muted'}, `${Math.round(approval*100)}% yes of all users`)), el('div',{class:'row'}, el('button',{onclick:()=>simulateMerge(p), disabled:!passing}, 'Merge'), el('button',{class:'ghost', onclick:()=>forkFromPatch(p)}, 'Fork')))); list.append(card); } for(const p of patches.filter(x=>x.status==='merged')){ const yes=Object.values(p.votes).filter(v=>v>0).length; const no=Object.values(p.votes).filter(v=>v<0).length; const when=p.merged_at? new Date(p.merged_at).toLocaleString() : ''; const headRight=el('div',{class:'row'}, el('span',{class:'pill green'}, 'merged'), el('span',{class:'pill'}, `${yes} yes / ${no} no`), when? el('span',{class:'pill'}, when): null); const card=el('div',{class:'patch-card'}, el('div',{class:'row',style:'justify-content:space-between;'}, el('div',{}, el('strong',{}, p.summary), el('div',{class:'mini muted'}, `Ops: ${p.ops_json.length} · Affects ${p.affected_blocks.length} blocks`)), headRight), el('div',{class:'diff'}, el('div',{}, el('div',{class:'label'},'Outline (before)'), el('pre',{class:'outline',html:decorateOutline(p.before_outline,true)})), el('div',{}, el('div',{class:'label'},'Outline (after)'), el('pre',{class:'outline',html:decorateOutline(p.after_outline,false)}))), el('div',{class:'footer'}, el('div',{class:'mini muted'}, `Merged by ${userName(p.authorId)}${when? ' · '+when : ''}`))); history && history.append(card); } }
+	function decorateOutline(text){ return text.replace(/^\- /gm, '<span class="del">- </span>').replace(/^\+ /gm, '<span class="add">+ </span>').replace(/^~ /gm, '<span class="upd">~ </span>').replace(/^↔ /gm, '<span class="mov">↔ </span>'); }
+	function vote(patchId, val){ const p=patches.find(x=>x.id===patchId); if(!p) return; const cur=p.votes[currentUserId]||0; const next=(cur===val)?0:val; if(next===0) delete p.votes[currentUserId]; else p.votes[currentUserId]=next; renderPatches(); }
+	function forkFromPatch(p){ logHistory(`Fork created from Patch #${p.id} by ${userName(currentUserId)} (votes carried).`); alert('Demo: Fork created (not rendering a new entry in this prototype).'); }
+	function logHistory(msg){ const h=document.getElementById('historyLog'); const t=new Date().toLocaleTimeString(); h.textContent += `\n[${t}] ${msg}`; }
+	function userName(id){ return (users.find(u=>u.id===id)||{}).name || id; }
+	function renderUsers(){ const sel=document.getElementById('userSelect'); sel.innerHTML=''; users.forEach(u=> sel.append(el('option',{value:u.id}, u.name)) ); sel.value=currentUserId; sel.addEventListener('change', ()=>{ currentUserId=sel.value; updateUserDot(); renderPatches(); }); updateUserDot(); }
+	function updateUserDot(){ const u=users.find(x=>x.id===currentUserId); const dot=document.getElementById('userDot'); dot.textContent = u.name.substring(0,1); dot.title = `Current user: ${u.name}`; }
+	function assert(cond, msg){ if(!cond){ throw new Error('Test failed: '+msg); } }
+	function runUnitTests(){ const base=structuredClone(initialBlocks); let ops=[{type:'UPDATE_TEXT', block_id:'p_meet', new_text:'CHANGED'}]; let out=applyOps(base, ops); assert(out.find(b=>b.id==='p_meet').text==='CHANGED','UPDATE_TEXT should modify p_meet'); assert(out.filter(b=>b.text==='CHANGED').length===1,'Only one block should be changed'); ops=[{type:'INSERT_BLOCK', after_id:'h_meet', new_block:{type:'p', text:'New paragraph', parent:null}}]; out=applyOps(base, ops); const iAnchor=out.findIndex(b=>b.id==='h_meet'); assert(out[iAnchor+1].text==='New paragraph','INSERT_BLOCK should insert after anchor'); ops=[{type:'DELETE_BLOCK', block_id:'p_tools'}]; out=applyOps(base, ops); assert(!out.some(b=>b.id==='p_tools'),'DELETE_BLOCK should remove p_tools'); ops=[{type:'MOVE_BLOCK', block_id:'p_quorum', after_id:'h_tools'}]; out=applyOps(base, ops); const j=out.findIndex(b=>b.id==='h_tools'); assert(out[j+1].id==='p_quorum','MOVE_BLOCK should place p_quorum after h_tools'); let staged=[{seq:1,type:'UPDATE_TEXT'},{seq:2,type:'DELETE_BLOCK'}]; let trimmed=removeOpBySeq(staged,1); assert(trimmed.length===1 && trimmed[0].seq===2,'removeOpBySeq should drop seq=1 only'); trimmed=removeOpBySeq(trimmed,42); assert(trimmed.length===1 && trimmed[0].seq===2,'removeOpBySeq should ignore unknown seq'); const t=targetedSets([{type:'UPDATE_TEXT', block_id:'p_meet'},{type:'MOVE_BLOCK', block_id:'p_quorum', after_id:'h_tools'}]); assert(t.blocks.includes('p_meet') && t.blocks.includes('p_quorum'),'targetedSets should include block ids'); assert(t.anchors.includes('after:h_tools'),'targetedSets should include anchors'); const afterBlocks=applyOps(base,[{type:'INSERT_BLOCK', after_id:'h_meet', new_block:{type:'h2', text:'New Section', parent:null}}]); const d=outlineDiff(base, afterBlocks); assert(/\+ ## New Section/.test(d.after),'outlineDiff should show + for added heading'); const btn1=el('button',{disabled:true}); assert(btn1.disabled===true,'el should set disabled=true as boolean and attribute'); const btn2=el('button',{disabled:false}); assert(btn2.disabled===false && !btn2.hasAttribute('disabled'),'el should remove disabled when false'); const savedEntry=JSON.parse(JSON.stringify(entry)); const savedPatches=patches.slice(); entry.blocks=structuredClone(initialBlocks); entry.version=1; patches.length=0; const autoPatch={ id:1,targetEntryId:entry.id,authorId:'u1',summary:'Auto',ops_json:[],affected_blocks:[],anchors:[],before_outline:'',after_outline:'',votes:{u1:1,u2:1},status:'published'}; patches.push(autoPatch); renderPatches(); assert(autoPatch.status==='merged','Auto-merge should set status merged when threshold reached'); assert(entry.version===2,'Auto-merge should increment entry version'); entry=savedEntry; patches=savedPatches; renderPatches(); entry.blocks=structuredClone(initialBlocks); entry.version=1; patches.length=0; const passPatch={id:2,targetEntryId:entry.id,authorId:'u1',summary:'Pass',ops_json:[],affected_blocks:[],anchors:[],before_outline:'',after_outline:'',votes:{u1:1,u2:1},status:'published'}; patches.push(passPatch); renderPatches(); const proposedCount=document.getElementById('patchList').children.length; const historyCount=document.getElementById('historyList').children.length; assert(proposedCount===0 && historyCount>=1,'Merged patches should move to history, not remain proposed'); entry.blocks=structuredClone(initialBlocks); entry.version=1; patches.length=0; const a={id:3,targetEntryId:entry.id,authorId:'u1',summary:'A',ops_json:[{type:'UPDATE_TEXT',block_id:'p_meet',new_text:'A'}],affected_blocks:['p_meet'],anchors:[],before_outline:'',after_outline:'',votes:{u1:1,u2:1},status:'published'}; const b={id:4,targetEntryId:entry.id,authorId:'u2',summary:'B',ops_json:[{type:'UPDATE_TEXT',block_id:'p_meet',new_text:'B'}],affected_blocks:['p_meet'],anchors:[],before_outline:'',after_outline:'',votes:{u1:1},status:'published'}; patches.push(a,b); recomputeOverlaps(); renderPatches(); const pb=patches.find(x=>x.id===4); assert(pb.status==='needs_update','Overlapping non-merged patches should be marked needs_update'); entry.blocks=structuredClone(initialBlocks); entry.version=1; patches.length=0; for(let i=0;i<50;i++){ patches.push({id:100+i,targetEntryId:entry.id,authorId:'u1',summary:'X'+i,ops_json:[],affected_blocks:[],anchors:[],before_outline:'',after_outline:'',votes:{u1:1,u2:1},status:'published'}); } renderPatches(); const mergedAll=patches.every(p=>p.status==='merged'); assert(mergedAll && entry.version>=51,'Bulk auto-merge should complete without recursion issues'); const savedDraft=JSON.parse(JSON.stringify(draft)); draft.ops=[{seq:1,type:'UPDATE_TEXT',block_id:'p_meet',new_text:'X'},{seq:2,type:'DELETE_BLOCK',block_id:'p_tools'}]; removeOp(1); assert(draft.ops.length===1 && draft.ops[0].seq===2,'removeOp should drop seq=1 from draft'); draft=savedDraft; logHistory('All built-in tests passed ✅'); }
+	function boot(){ renderUsers(); renderEntry(); renderComposer(); stageMove('p_meet','down'); stageUpdate('p_meet'); const upd=draft.ops.find(o=>o.type==='UPDATE_TEXT' && o.block_id==='p_meet'); if(upd){ upd.new_text = entry.blocks.find(b=>b.id==='p_meet').text.replace('monthly','every other month') + ' Agenda posted 48h before.'; } document.getElementById('patchSummary').value='Move & clarify meetings'; document.getElementById('runTests').addEventListener('click', ()=>{ try{ runUnitTests(); } catch(e){ console.error(e); logHistory(e.message); alert(e.message); } }); }
+	boot();
+})();

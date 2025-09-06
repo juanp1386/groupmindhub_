@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Projects</h1>
+{% if user.is_authenticated %}
+<div class="card">
+  <h3>Create Project</h3>
+  <form method="post" style="display:flex;flex-direction:column;gap:8px;max-width:420px;">{% csrf_token %}
+    <input type="hidden" name="action" value="create_project" />
+    <input type="hidden" name="sim_user" id="formSimUserHidden" />
+    <label>Name<br><input name="name" required placeholder="e.g., Community Garden Bylaws"></label>
+    <label>Description<br><textarea name="description" rows="3" placeholder="Optional short description"></textarea></label>
+    <label>Initial Outline (## heading lines, paragraphs under them)<br>
+      <textarea name="initial_outline" rows="8" placeholder="## Purpose\nParagraph describing purpose...\n\n## Meetings\nDescribe cadence..."></textarea>
+    </label>
+  <div><button>Create project</button></div>
+  </form>
+</div>
+{% else %}
+<p><a href="/login/?next=/">Login to create a project</a></p>
+{% endif %}
+<div class="card">
+  {% if projects %}
+    <table>
+  <tr><th>Name</th><th>Created</th></tr>
+      {% for p in projects %}
+        <tr>
+          <td><a href="/projects/{{ p.id }}/">{{ p.name }}</a></td>
+          <td>{{ p.created_at|date:'Y-m-d H:i' }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p>No projects yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+<script>
+  (function(){
+    const key='gmh_sim_user';
+    const cur=localStorage.getItem(key)||'';
+    const hid=document.getElementById('formSimUserHidden');
+    if(hid) hid.value=cur;
+    // When user changes global select reflect here
+    const sel=document.getElementById('simUserSelect');
+    if(sel){sel.addEventListener('change',()=>{const v=sel.value;const h=document.getElementById('formSimUserHidden');if(h)h.value=v;});}
+  })();
+</script>

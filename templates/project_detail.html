@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project: {{ project.name }}</title>
+  <style>
+    body{margin:0;font:14px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;background:#1c2321;color:#eef1ef}
+    a{color:#bcdfff;text-decoration:none}
+    header{background:#1c2321;position:sticky;top:0;padding:16px;border-bottom:1px solid #3a4448}
+    .wrap{max-width:1100px;margin:0 auto;padding:0 16px}
+    h1{margin:0 0 4px;font-size:22px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}
+    .card{background:#5e6572;border:1px solid #7d98a1;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:18px;display:flex;flex-direction:column;gap:14px}
+    input,textarea,button{background:#1c2321;color:#eef1ef;border:1px solid #7d98a1;border-radius:8px;padding:8px;font:inherit}
+    button{cursor:pointer}
+    button.primary{background:#a9b4c2;color:#1c2321;border-color:transparent}
+    ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+    .entry-row{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(0,0,0,.15);border:1px solid #7d98a1;border-radius:10px}
+    .pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:999px;background:#1c2321;border:1px solid #7d98a1;color:#7d98a1}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Project: {{ project.name }}</h1>
+      <div style="color:#7d98a1">{{ project.description|default:'No description' }}</div>
+      <div style="margin-top:8px"><a href="/">← All projects</a></div>
+    </div>
+  </header>
+  <main class="wrap">
+    <div class="grid">
+      <section class="card" style="min-height:300px">
+        <h2 style="margin:0">Entries</h2>
+        <ul>
+          {% for e in project.entries.all %}
+            <li class="entry-row">
+              <div>
+                <strong><a href="/entries/{{ e.id }}/">{{ e.title }}</a></strong>
+                <span class="pill">v{{ e.entry_version_int }}</span>
+                {% if e.status == 'draft' %}<span class="pill" style="background:#ffd16620;color:#ffd166;border-color:#ffd16680">draft</span>{% endif %}
+              </div>
+              <div style="font-size:12px;color:#d0d7dd">{{ e.created_at|date:'Y-m-d H:i' }}</div>
+            </li>
+          {% empty %}
+            <li class="entry-row" style="justify-content:center;color:#ccd">No entries yet.</li>
+          {% endfor %}
+        </ul>
+      </section>
+      <section class="card">
+        {% if user.is_authenticated %}
+          <h2 style="margin:0">Create Entry</h2>
+          <form method="post" style="display:flex;flex-direction:column;gap:12px">{% csrf_token %}
+            <input type="hidden" name="action" value="create_entry" />
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">Title
+              <input name="title" required placeholder="e.g., Trunk v1" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">Initial Content (optional)
+              <textarea name="content" rows="4" placeholder="Optional context"></textarea>
+            </label>
+            <button class="primary">Create draft entry</button>
+          </form>
+        {% else %}
+          <p><a href="/login/?next={{ request.path }}">Login</a> to create an entry.</p>
+        {% endif %}
+        <div style="font-size:12px;color:#1c2321;background:#a9b4c2;padding:8px;border-radius:8px">Entries open in the full interactive editing UI with patches & ops.</div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Patch #{{ patch.id }}</h1>
+<p>{{ patch.summary }} · Status: <strong>{{ patch.status }}</strong></p>
+
+<div class="card">
+  <h3>Votes</h3>
+  {% if user.is_authenticated %}
+    <form method="post" style="display:inline-block;margin-right:8px">{% csrf_token %}
+      <input type="hidden" name="action" value="vote" />
+      <input type="hidden" name="value" value="1" />
+      <button>▲ Upvote</button>
+    </form>
+    <form method="post" style="display:inline-block">{% csrf_token %}
+      <input type="hidden" name="action" value="vote" />
+      <input type="hidden" name="value" value="-1" />
+      <button>▼ Downvote</button>
+    </form>
+  {% else %}
+    <p><a href="/login/?next={{ request.path }}">Login to vote</a></p>
+  {% endif %}
+</div>
+
+{% if patch.status == 'draft' and user.is_authenticated %}
+<div class="card">
+  <h3>Publish Patch</h3>
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="action" value="publish_patch" />
+    <button>Publish</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

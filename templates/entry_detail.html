@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ entry.title }} – GroupMindHub Entry</title>
+  <style>
+    :root{--bg:#1c2321;--panel:#5e6572;--muted:#7d98a1;--text:#eef1ef;--accent:#a9b4c2;--green:#5bd380;--red:#ff7171;--yellow:#ffd166;--border:#7d98a1;}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial}
+    header{position:sticky;top:0;z-index:10;background:rgba(28,35,33,.9);backdrop-filter:saturate(140%) blur(10px);border-bottom:1px solid var(--border)}
+    .wrap{max-width:1200px;margin:0 auto;padding:16px}
+    h1{margin:0 0 4px;font-size:20px}h2{font-size:16px;margin:16px 0 8px}.sub{color:var(--muted)}
+    select,button,input,textarea{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px}button{cursor:pointer}
+    button.primary{background:var(--accent);color:var(--bg);border-color:transparent}button.ghost{background:transparent}
+    .grid{display:grid;grid-template-columns:1.05fr .95fr;gap:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .card .hd{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border)}
+    .card .bd{padding:14px}.pill{display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);padding:4px 8px;border-radius:999px;color:var(--muted);font-size:12px}
+    .entry{display:flex;flex-direction:column;gap:10px}.block{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:flex-start;padding:10px 12px;border:1px dashed transparent;border-radius:10px}
+    .block:hover{border-color:var(--border);background:rgba(255,255,255,.04)}.block.active{border-color:var(--accent);background:rgba(169,180,194,.15)}
+    .gutter{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:2px}.handle{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;border:1px solid var(--border);background:var(--bg);color:var(--muted);font-size:12px}
+    .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;line-height:1}
+    .icon-btn:hover{background:rgba(255,255,255,.06)}.block-actions{display:none}.row{display:flex;align-items:center;gap:8px}
+    .stack{display:flex;flex-direction:column;gap:10px}.textarea{width:100%;min-height:90px}.mini{font-size:12px}
+    .patch-card{border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}
+    .patch-card.overlap{outline:1px dashed #6aa4ff}.outline{border:1px solid var(--border);border-radius:8px;padding:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+    .diff{display:grid;grid-template-columns:1fr 1fr;gap:8px}.del{color:#ffb3b3}.add{color:#bff6cf}.mov{color:#ffe6ad}.upd{color:#c6d7ff}
+    .footer{margin-top:8px;display:flex;justify-content:space-between;align-items:center}.vote{display:flex;align-items:center;gap:4px}
+    .vote button{padding:6px 8px;border-radius:6px}.vote .score{min-width:30px;text-align:center}.tag{display:inline-block;padding:2px 6px;border-radius:6px;background:var(--bg);color:var(--muted);border:1px solid var(--border);font-size:12px}
+    .list{display:flex;flex-direction:column;gap:10px}.label{font-size:12px;color:var(--muted)}.user-dot{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--panel);border:1px solid var(--border)}
+    .sep{height:1px;background:var(--border);margin:10px 0}.history{font-size:12px;color:var(--muted)}.status{display:flex;gap:6px;flex-wrap:wrap}.help{font-size:12px;color:var(--muted)}
+    @media (max-width:980px){.grid{grid-template-columns:1fr}}.ctx-menu{position:fixed;display:none;min-width:200px;background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.35);padding:6px;z-index:1000}
+    .ctx-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer}.ctx-item:hover{background:rgba(255,255,255,.06)}.ctx-hr{height:1px;background:var(--border);margin:6px 4px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="row" style="justify-content:space-between;">
+        <div class="row" style="align-items:center;gap:14px;">
+          <a href="/" style="text-decoration:none;color:#8cf;font-size:12px;">Home</a>
+          <div>
+            <h1 style="margin:0">GroupMindHub · Entry View</h1>
+            <div class="sub">Entry: <strong id="entryTitle"></strong> · Version <span id="entryVersion"></span> · Votes <span id="entryVotes"></span></div>
+          </div>
+        </div>
+        <div class="row">
+          <span class="label">Simulate user:</span>
+          <select id="userSelect"></select>
+          <span class="user-dot" id="userDot" title="current user"></span>
+        </div>
+      </div>
+    </div>
+  </header>
+  <main class="wrap" style="padding-top:12px;">
+    <script type="application/json" id="__entry_json">{{ ENTRY_JSON|safe }}</script>
+    <div class="grid">
+      <section class="card">
+        <div class="hd">
+          <div class="row">
+            <strong>Entry (Published)</strong>
+            <span class="pill">version <span id="entryVersion2"></span></span>
+            <span class="pill">votes <span id="entryVotes2"></span></span>
+          </div>
+          <div class="status" id="entryStatus"></div>
+        </div>
+        <div class="bd">
+          <div class="entry" id="entryBlocks"></div>
+          <div class="sep"></div>
+          <h2 style="margin-top:0">Proposed patches</h2>
+          <div class="help" id="patchHelp">Loading patches…</div>
+          <div id="patchList" class="list" style="margin-top:10px"></div>
+          <div class="sep"></div>
+          <h2 style="margin-top:0">Change history</h2>
+            <div id="historyList" class="list" style="margin-top:10px"></div>
+          <div class="sep"></div>
+          <div class="history" id="historyLog">History: (empty)</div>
+        </div>
+      </section>
+      <aside class="card">
+        <div class="hd">
+          <strong>Patch composer (ops)</strong>
+          <div class="row"><button class="ghost" id="btnClear">Clear</button></div>
+        </div>
+        <div class="bd">
+          <div class="stack" id="composerArea"><div class="help">Click a block’s actions to add an operation. You can stage multiple ops before publishing.</div></div>
+          <div class="stack" style="margin-top:10px">
+            <label class="label" for="patchSummary">1‑line summary</label>
+            <input id="patchSummary" placeholder="e.g., Improve wording" />
+            <div class="row" style="justify-content:space-between;align-items:center;">
+              <div class="row" style="gap:6px"><span class="label">Affects:</span><div id="affectsTags" class="row" style="flex-wrap:wrap;gap:6px"></div></div>
+              <button class="primary" id="btnPublish" disabled>Publish patch</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <div id="ctxMenu" class="ctx-menu" role="menu" aria-hidden="true"></div>
+  <script>
+    const ENTRY_DATA = JSON.parse(document.getElementById('__entry_json').textContent);
+  const users=[{id:'ana',name:'Ana'},{id:'ben',name:'Ben'},{id:'chen',name:'Chen'},{id:'devi',name:'Devi'},{id:'eli',name:'Eli'},{id:'demo',name:'Demo'}];
+  let currentUserId = (localStorage.getItem('gmh_sim_user') && users.find(u=>u.id===localStorage.getItem('gmh_sim_user'))?.id) || users[0].id;
+    let entry={ id:ENTRY_DATA.id, title:ENTRY_DATA.title, version:ENTRY_DATA.version, votes:ENTRY_DATA.votes, blocks:structuredClone(ENTRY_DATA.blocks)};
+  let patches=[]; let draft={ops:[],opSeq:1};
+  async function apiJson(url,opts={}){opts.headers=Object.assign({'Content-Type':'application/json','X-Requested-With':'fetch'},opts.headers||{});const r=await fetch(url,opts);if(!r.ok) throw new Error('HTTP '+r.status);return r.json();}
+  async function loadPatches(){try{document.getElementById('patchHelp').textContent='Loading patches…';const stored=localStorage.getItem('gmh_sim_user');const simUser=stored || currentUserId;const qs=simUser?`?sim_user=${encodeURIComponent(simUser)}`:'';const data=await apiJson(`/api/projects/${ENTRY_DATA.project_id}/patches${qs}`);patches=data.patches||[];document.getElementById('patchHelp').textContent=patches.length?'' :'No patches yet.';renderPatches();}catch(e){document.getElementById('patchHelp').textContent='Failed to load patches.';console.error(e);}}
+    function el(t,a={},...c){const e=document.createElement(t);for(const[k,v]of Object.entries(a)){if(k==='class')e.className=v;else if(k==='html')e.innerHTML=v;else if(k.startsWith('on')&&typeof v==='function')e.addEventListener(k.slice(2),v);else if(typeof v==='boolean'){if(v){e.setAttribute(k,'');if(k in e)e[k]=true;}else{e.removeAttribute(k);if(k in e)e[k]=false;}}else e.setAttribute(k,v);}for(const n of c){if(n==null)continue;e.append(n.nodeType?n:document.createTextNode(n));}return e;}
+    function cloneBlocks(bs){return bs.map(b=>({...b}));}function findIndex(bs,id){return bs.findIndex(b=>b.id===id);}function applyOps(blocks,ops){const out=cloneBlocks(blocks);const newId=p=>`${p}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;for(const op of ops){if(op.type==='UPDATE_TEXT'){const i=findIndex(out,op.block_id);if(i!==-1)out[i].text=op.new_text;}else if(op.type==='INSERT_BLOCK'){const nb={id:op.new_block.id||newId('new'),type:op.new_block.type,text:op.new_block.text,parent:op.new_block.parent||null};const idx=op.after_id?findIndex(out,op.after_id):-1;out.splice(idx+1,0,nb);}else if(op.type==='DELETE_BLOCK'){const i=findIndex(out,op.block_id);if(i!==-1)out.splice(i,1);}else if(op.type==='MOVE_BLOCK'){const i=findIndex(out,op.block_id);if(i!==-1){const blk=out.splice(i,1)[0];const j=op.after_id?findIndex(out,op.after_id):-1;blk.parent=op.new_parent??blk.parent;out.splice(j+1,0,blk);}}}return out;}
+  function targetedSets(ops){const blocks=new Set(),anchors=new Set();ops.forEach(o=>{if(o.block_id)blocks.add(o.block_id);if(o.after_id)anchors.add('after:'+o.after_id);});return{blocks:[...blocks],anchors:[...anchors]};}
+  function applyOps(baseBlocks,ops){const cloned=baseBlocks.map(b=>({...b}));const byId=new Map(cloned.map(b=>[b.id,b]));ops.forEach(op=>{if(op.type==='UPDATE_TEXT'){const b=byId.get(op.block_id);if(b)b.text=op.new_text;}else if(op.type==='INSERT_BLOCK'){const idx=op.after_id?cloned.findIndex(b=>b.id===op.after_id):-1;const nb={id:'tmp_'+Math.random().toString(36).slice(2),type:op.new_block.type,text:op.new_block.text};cloned.splice(idx+1,0,nb);}else if(op.type==='DELETE_BLOCK'){const i=cloned.findIndex(b=>b.id===op.block_id);if(i!==-1)cloned.splice(i,1);}else if(op.type==='MOVE_BLOCK'){const i=cloned.findIndex(b=>b.id===op.block_id);if(i!==-1){const [blk]=cloned.splice(i,1);const j=op.after_id?cloned.findIndex(b=>b.id===op.after_id):-1;cloned.splice(j+1,0,blk);}}});return cloned;}
+    function renderEntry(){const cont=document.getElementById('entryBlocks');cont.innerHTML='';entry.blocks.forEach(b=>{const node=el('div',{class:'block','data-block-id':b.id});const gut=el('div',{class:'gutter'},el('span',{class:'handle',title:(b.type==='h2'?`Section: ${b.text}`:'Paragraph')},b.type==='h2'?'§':'¶'),el('button',{class:'icon-btn',title:'Actions',onclick:ev=>{ev.stopPropagation();openMenuForBlock(b.id,ev.currentTarget);}},'⋯'));const content=el('div',{},b.type==='h2'?el('h2',{},b.text):el('p',{},b.text));node.append(gut,content);cont.append(node);});['entryVersion','entryVersion2'].forEach(id=>{const elv=document.getElementById(id);if(elv)elv.textContent=entry.version;});['entryVotes','entryVotes2'].forEach(id=>{const elv=document.getElementById(id);if(elv)elv.textContent=entry.votes;});document.getElementById('entryTitle').textContent=entry.title;}
+    function renderComposer(){const area=document.getElementById('composerArea');area.innerHTML='';if(draft.ops.length===0){area.append(el('div',{class:'help'},'No ops staged. Use block actions.'));}else{draft.ops.forEach(op=>{const row=el('div',{class:'stack'});const head=el('div',{class:'row',style:'justify-content:space-between'},el('div',{},el('span',{class:'tag'},op.type),el('span',{class:'mini muted'},`#${op.seq}`)),el('div',{},el('button',{class:'ghost mini',onclick:()=>removeOp(op.seq)},'Remove')));row.append(head);if(op.type==='UPDATE_TEXT'){const b=entry.blocks.find(x=>x.id===op.block_id);row.append(el('div',{class:'label'},`Edit ${shortId(op.block_id)} (${b?.type||'?'})`));const ta=el('textarea',{class:'textarea'});ta.value=op.new_text;ta.addEventListener('input',()=>{op.new_text=ta.value;refreshAffects();});row.append(ta);}if(op.type==='INSERT_BLOCK'){row.append(el('div',{class:'label'},`Insert ${op.new_block.type} after ${shortId(op.after_id)||'start'}`));const ta=el('textarea',{class:'textarea'});ta.value=op.new_block.text;ta.addEventListener('input',()=>{op.new_block.text=ta.value;refreshAffects();});row.append(ta);}if(op.type==='DELETE_BLOCK'){row.append(el('div',{class:'label'},`Delete ${shortId(op.block_id)}`));}if(op.type==='MOVE_BLOCK'){row.append(el('div',{class:'label'},`Move ${shortId(op.block_id)} after ${shortId(op.after_id)||'start'}`));row.append(el('div',{class:'row'},el('button',{class:'ghost mini',onclick:()=>shiftAnchor(op,-1)},'◀ up'),el('button',{class:'ghost mini',onclick:()=>shiftAnchor(op,1)},'down ▶')));}area.append(row);area.append(el('div',{class:'sep'}));});}document.getElementById('btnPublish').disabled=draft.ops.length===0;refreshAffects();}
+    function shiftAnchor(op,d){const idx=op.after_id?findIndex(entry.blocks,op.after_id):-1;let ni=Math.max(-1,Math.min(entry.blocks.length-1,idx+d));op.after_id=ni>=0?entry.blocks[ni].id:null;renderComposer();}
+    function shortId(id){return id?id.replace(/[a-z_]+/,'')||id.slice(-4):'∅';}
+    function stageUpdate(id){if(draft.ops.some(o=>o.type==='UPDATE_TEXT'&&o.block_id===id)){alert('Update already staged');return;}const txt=entry.blocks.find(b=>b.id===id)?.text||'';draft.ops.push({seq:draft.opSeq++,type:'UPDATE_TEXT',block_id:id,new_text:txt});renderComposer();}
+    function stageInsert(anchorId,type,where){let after_id=(where==='below')?anchorId:null;if(where==='above'){const idx=findIndex(entry.blocks,anchorId);after_id=idx>0?entry.blocks[idx-1].id:null;}draft.ops.push({seq:draft.opSeq++,type:'INSERT_BLOCK',after_id,new_block:{id:null,type,text:'New '+(type==='h2'?'heading':'paragraph'),parent:null}});renderComposer();}
+    function stageDelete(id){draft.ops.push({seq:draft.opSeq++,type:'DELETE_BLOCK',block_id:id});renderComposer();}
+    function stageMove(id,dir){const cur=findIndex(entry.blocks,id);const aIdx=dir==='up'?Math.max(-1,cur-2):Math.min(entry.blocks.length-1,cur);const after_id=aIdx>=0?entry.blocks[aIdx].id:null;draft.ops.push({seq:draft.opSeq++,type:'MOVE_BLOCK',block_id:id,after_id});renderComposer();}
+    function removeOp(seq){draft.ops=draft.ops.filter(o=>o.seq!==seq);renderComposer();}
+    function refreshAffects(){const tags=document.getElementById('affectsTags');tags.innerHTML='';const ids=new Set();draft.ops.forEach(o=>{if(o.block_id)ids.add(o.block_id);});[...ids].forEach(id=>{const b=entry.blocks.find(x=>x.id===id);const label=b?(b.type==='h2'?`§ ${b.text}`:`¶ ${b.text.slice(0,30)}…`):shortId(id);tags.append(el('span',{class:'tag'},label));});}
+    function openMenuForBlock(blockId,anchorEl){closeMenu();const blockEl=document.querySelector(`[data-block-id="${blockId}"]`);blockEl&&blockEl.classList.add('active');ctxMenu.innerHTML='';const add=(lab,icon,fn)=>ctxMenu.append(el('div',{class:'ctx-item',onclick:ev=>{ev.stopPropagation();fn();closeMenu();}},el('span',{class:'mini'},icon),el('div',{},lab)));add('Edit text','✏',()=>stageUpdate(blockId));add('Insert heading above','＋',()=>stageInsert(blockId,'h2','above'));add('Insert paragraph below','＋',()=>stageInsert(blockId,'p','below'));ctxMenu.append(el('div',{class:'ctx-hr'}));add('Move up','↥',()=>stageMove(blockId,'up'));add('Move down','↧',()=>stageMove(blockId,'down'));ctxMenu.append(el('div',{class:'ctx-hr'}));add('Delete block','🗑',()=>stageDelete(blockId));const r=anchorEl.getBoundingClientRect();ctxMenu.style.top=(r.bottom+6)+'px';ctxMenu.style.left=Math.min(window.innerWidth-220,r.left-10)+'px';ctxMenu.style.display='block';setTimeout(()=>document.addEventListener('click',docClick,{once:true}),0);openMenuBlockId=blockId;}
+    function docClick(e){if(!ctxMenu.contains(e.target))closeMenu();}
+    let openMenuBlockId=null;const ctxMenu=document.getElementById('ctxMenu');function closeMenu(){if(openMenuBlockId){const elb=document.querySelector(`[data-block-id="${openMenuBlockId}"]`);elb&&elb.classList.remove('active');}openMenuBlockId=null;ctxMenu.style.display='none';ctxMenu.innerHTML='';}
+    window.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu();});window.addEventListener('scroll',()=>closeMenu(),{passive:true});
+    function computeOutlineDiff(beforeBlocks, afterBlocks){
+      // Clone prototype's outlineDiff for parity
+      const before = beforeBlocks.map(b=>({id:b.id,type:b.type,text:b.text}));
+      const after = afterBlocks.map(b=>({id:b.id,type:b.type,text:b.text}));
+      const beforeIds=new Set(before.map(b=>b.id));
+      const afterIds=new Set(after.map(b=>b.id));
+      const moved=new Set();const updated=new Set();
+      const idxBefore=new Map(before.map((b,i)=>[b.id,i]));
+      const idxAfter=new Map(after.map((b,i)=>[b.id,i]));
+      before.forEach(b=>{if(!afterIds.has(b.id))return;const a=after[idxAfter.get(b.id)];if(a.text!==b.text)updated.add(b.id);if(idxBefore.get(b.id)!==idxAfter.get(b.id))moved.add(b.id);});
+      const linesBefore=before.map(b=>{if(!afterIds.has(b.id))return `- ${b.type==='h2'?'##':'‣'} ${b.text}`;if(updated.has(b.id))return `~ ${b.type==='h2'?'##':'‣'} ${b.text}`;if(moved.has(b.id))return `↔ ${b.type==='h2'?'##':'‣'} ${b.text}`;return `  ${b.type==='h2'?'##':'‣'} ${b.text}`;}).join('\n');
+      const linesAfter=after.map(b=>{if(!beforeIds.has(b.id))return `+ ${b.type==='h2'?'##':'‣'} ${b.text}`;if(updated.has(b.id))return `~ ${b.type==='h2'?'##':'‣'} ${b.text}`;if(moved.has(b.id))return `↔ ${b.type==='h2'?'##':'‣'} ${b.text}`;return `  ${b.type==='h2'?'##':'‣'} ${b.text}`;}).join('\n');
+      return {before:linesBefore,after:linesAfter};
+    }
+    document.getElementById('btnClear').addEventListener('click',()=>{draft.ops=[];renderComposer();});
+  document.getElementById('btnPublish').addEventListener('click',async()=>{const summary=document.getElementById('patchSummary').value.trim();const ops=JSON.parse(JSON.stringify(draft.ops));if(ops.length===0)return;const afterBlocks=applyOps(entry.blocks,ops);const diff=computeOutlineDiff(entry.blocks,afterBlocks);const tsets=targetedSets(ops);const simUser=localStorage.getItem('gmh_sim_user')||currentUserId; if(!simUser){alert('Select a simulated user first.');return;}try{document.getElementById('btnPublish').disabled=true;await apiJson(`/api/projects/${ENTRY_DATA.project_id}/patches/create`,{method:'POST',body:JSON.stringify({entry_id:ENTRY_DATA.id,summary,ops_json:ops,affected_blocks:tsets.blocks,anchors:tsets.anchors,before_outline:diff.before,after_outline:diff.after,sim_user:simUser})});draft.ops=[];document.getElementById('patchSummary').value='';renderComposer();await loadPatches();}catch(e){alert('Failed to publish patch.');console.error(e);}finally{document.getElementById('btnPublish').disabled=false;}});
+  function renderPatches(){
+    const list=document.getElementById('patchList');
+    const hist=document.getElementById('historyList');
+    list.innerHTML=''; if(hist) hist.innerHTML='';
+    if(patches.length===0){return;}
+    patches.forEach(p=>{
+      const yes=p.yes||0;const no=p.no||0;const totalVotes=yes+no;const approval=totalVotes?(yes/(yes+no)):0;const passing=approval>=0.4;const voted=p.current_user_vote||0;
+      const diffPanel=(p.before_outline||p.after_outline)?el('div',{class:'diff'},
+        el('div',{},el('div',{class:'label'},'Outline (before)'),el('pre',{class:'outline',html:decorateOutline(p.before_outline||'')})),
+        el('div',{},el('div',{class:'label'},'Outline (after)'),el('pre',{class:'outline',html:decorateOutline(p.after_outline||'')}))
+      ):null;
+      const baseCard=el('div',{class:'patch-card'},
+        el('div',{class:'row',style:'justify-content:space-between;'},
+          el('div',{},el('strong',{},p.summary),el('div',{class:'mini muted'},`Ops: ${p.ops_json.length}`)),
+          el('div',{class:'row'},el('span',{class:'pill'},`${yes} yes / ${no} no`),
+            p.status==='merged'?el('span',{class:'pill green'},'merged'):
+              passing?el('span',{class:'pill'},'merge‑ready'):null)
+        ),
+        diffPanel,
+        p.status==='merged'
+          ? el('div',{class:'footer'},el('div',{class:'mini muted'},'Merged'))
+          : el('div',{class:'footer'},
+              el('div',{class:'vote'},
+                 el('button',{class:(voted===1?'good':''),onclick:()=>vote(p,1)},'▲'),
+                 el('span',{class:'score'},(yes-no)),
+                 el('button',{class:(voted===-1?'bad':''),onclick:()=>vote(p,-1)},'▼'),
+                 el('span',{class:'mini muted'},`${Math.round(approval*100)}%`)
+              ),
+              el('div',{class:'row'},el('button',{disabled:!passing||p.status==='merged',onclick:()=>manualMerge(p)},'Merge'))
+            )
+      );
+      if(p.status==='merged') hist&&hist.append(baseCard); else list.append(baseCard);
+    });
+  }
+  function decorateOutline(text){return (text||'').replace(/^\- /gm,'<span class="del">- </span>').replace(/^\+ /gm,'<span class="add">+ </span>').replace(/^~ /gm,'<span class="upd">~ </span>').replace(/^↔ /gm,'<span class="mov">↔ </span>');}
+  async function vote(p,val){try{const cur=p.current_user_vote||0;const next=cur===val?0:val;const simUser=localStorage.getItem('gmh_sim_user')||currentUserId; if(!simUser){alert('Select a simulated user first.');return;}const resp=await apiJson(`/api/patches/${p.id}/votes`,{method:'POST',body:JSON.stringify({value:next,sim_user:simUser})});Object.assign(p,resp.patch);renderPatches();}catch(e){alert('Vote failed.');console.error(e);}}
+  async function manualMerge(p){try{const simUser=localStorage.getItem('gmh_sim_user')||currentUserId; if(!simUser){alert('Select a simulated user first.');return;}const resp=await apiJson(`/api/patches/${p.id}/merge?sim_user=${encodeURIComponent(simUser)}`,{method:'POST'});Object.assign(p,resp.patch);await refreshEntry();renderPatches();}catch(e){alert('Merge failed');console.error(e);}}
+  async function refreshEntry(){try{const data=await apiJson(`/api/projects/${ENTRY_DATA.project_id}/entry`);if(data.entry){entry.blocks=data.entry.blocks;entry.version=data.entry.version;renderEntry();}}catch(e){console.error(e);}}
+  // legacy simulateMerge logic removed; merges now through API
+    function logHistory(msg){const h=document.getElementById('historyLog');const t=new Date().toLocaleTimeString();h.textContent+=`\n[${t}] ${msg}`;}
+  function renderUsers(){const sel=document.getElementById('userSelect');sel.innerHTML='';users.forEach(u=>sel.append(el('option',{value:u.id},u.name)));sel.value=currentUserId;sel.addEventListener('change',()=>{currentUserId=sel.value;localStorage.setItem('gmh_sim_user',currentUserId);loadPatches();updateUserDot();});localStorage.setItem('gmh_sim_user',currentUserId);updateUserDot();}
+    function updateUserDot(){const u=users.find(x=>x.id===currentUserId);const d=document.getElementById('userDot');d.textContent=u.name[0];d.title='Current user: '+u.name;}
+  function boot(){renderUsers();renderEntry();renderComposer();loadPatches();}
+    boot();
+  </script>
+  
+</body>
+</html>

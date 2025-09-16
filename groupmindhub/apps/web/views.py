@@ -4,18 +4,54 @@ from django.contrib.auth import authenticate, login, logout
 from django.shortcuts import render, redirect, get_object_or_404
 import json
 from django.utils import timezone
-from groupmindhub.apps.core.models import Project, Entry, Patch, Vote, Block
+from groupmindhub.apps.core.models import Project, Entry, Patch, Vote, Block, Section, ProjectStar
 from django.http import HttpResponse
 from pathlib import Path
 
 
 def index(request):
-    if request.method == "POST" and request.POST.get("action") == "create_project":
-        name = request.POST.get("name", "").strip()
-        desc = request.POST.get("description", "").strip()
-        initial_outline = request.POST.get('initial_outline', '').strip()
+    """Home page listing projects with stars + activity; creation moved to /projects/new/."""
+    from django.db.models import Count
+    from django.utils import timezone
+    now = timezone.now()
+    day_ago = now - timezone.timedelta(days=1)
+    week_ago = now - timezone.timedelta(days=7)
+    # Prefetch related counts cheaply
+    projects = list(Project.objects.all().order_by('-created_at'))
+    user_star_ids = set()
+    if request.user.is_authenticated:
+        user_star_ids = set(ProjectStar.objects.filter(user=request.user, project__in=projects).values_list('project_id', flat=True))
+    # Build activity (simple heuristic for now): recent_patch_weight = patches<24h *1 + patches<7d *0.2
+    patch_qs = Patch.objects.filter(project__in=projects)
+    recent_counts = {
+        'day': dict(patch_qs.filter(created_at__gte=day_ago).values_list('project_id').annotate(c=Count('id'))),
+        'week': dict(patch_qs.filter(created_at__gte=week_ago).values_list('project_id').annotate(c=Count('id'))),
+    }
+    star_counts = dict(ProjectStar.objects.filter(project__in=projects).values_list('project_id').annotate(c=Count('id')))
+    rows = []
+    for p in projects:
+        day_c = recent_counts['day'].get(p.id, 0)
+        week_c = recent_counts['week'].get(p.id, 0)
+        activity = day_c + week_c * 0.2
+        rows.append({
+            'id': p.id,
+            'name': p.name,
+            'created_at': p.created_at,
+            'stars': star_counts.get(p.id, 0),
+            'starred': p.id in user_star_ids,
+            'activity': activity,
+        })
+    # Sort by created_at already; activity can be used client-side for filtering later.
+    return render(request, 'index.html', { 'projects': rows })
+
+
+def project_new(request):
+    """Project creation with section builder (heading + body)."""
+    if request.method == 'POST':
+        name = request.POST.get('name','').strip()
+        desc = request.POST.get('description','').strip()
+        sections_json = request.POST.get('sections_json','').strip()
         sim_user = request.POST.get('sim_user')
-        # If not authenticated but sim_user provided, auto-create/login that user
         if not request.user.is_authenticated and sim_user:
             from django.contrib.auth import get_user_model
             from django.contrib.auth import login as auth_login
@@ -24,44 +60,54 @@ def index(request):
             auth_login(request, user)
         if name:
             project = Project.objects.create(name=name, description=desc)
-            # Create single canonical entry immediately
             entry = Entry.objects.create(project=project, title='Trunk', author=request.user, status='published')
-            # Parse outline: expect lines starting with ## (heading) or plain paragraph lines; blank line separates sections.
-            blocks = []
+            # Parse sections JSON
+            try:
+                sections = json.loads(sections_json) if sections_json else []
+            except Exception:
+                sections = []
             pos = 0
-            pending_para = []
-            def flush_para():
-                nonlocal pending_para, pos
-                if pending_para:
-                    text = ' '.join(pending_para).strip()
-                    if text:
-                        pos += 1
-                        Block.objects.create(entry=entry, stable_id=f"p_{pos}", type='p', text=text, parent_stable_id=current_heading)
-                    pending_para = []
-            current_heading = None
-            for line in initial_outline.splitlines():
-                line = line.rstrip()
-                if not line:
-                    flush_para(); continue
-                # Accept lines starting with either '##' or a single '#'
-                if line.startswith('##') or (line.startswith('#') and not line.startswith('###')):
-                    flush_para()
-                    pos += 1
-                    text = line.lstrip('#').strip()
-                    hid = f"h_{pos}"
-                    Block.objects.create(entry=entry, stable_id=hid, type='h2', text=text, parent_stable_id=None, position=pos)
-                    current_heading = hid
-                else:
-                    pending_para.append(line)
-            flush_para()
-            # Ensure positions assigned for any paragraphs created (they defaulted)
-            for b in entry.blocks.filter(position=0):
+            for idx, s in enumerate(sections, start=1):
+                heading = (s.get('heading') or '').strip()
+                body = (s.get('body') or '').strip()
+                if not heading and not body:
+                    continue
+                stable_id = f's{idx}'
                 pos += 1
-                b.position = pos
-                b.save(update_fields=['position'])
-            return redirect("project_detail", project_id=project.id)
-    projects = Project.objects.all().order_by("-created_at")
-    return render(request, "index.html", {"projects": projects})
+                Section.objects.create(entry=entry, stable_id=stable_id, heading=heading or f'Section {idx}', body=body, position=pos)
+                # Create equivalent Blocks for current entry_detail consumption
+                Block.objects.create(entry=entry, stable_id=f'h_{stable_id}', type='h2', text=heading or f'Section {idx}', parent_stable_id=None, position=pos)
+                if body:
+                    pos += 1
+                    Block.objects.create(entry=entry, stable_id=f'p_{stable_id}', type='p', text=body, parent_stable_id=f'h_{stable_id}', position=pos)
+            return redirect('project_detail', project_id=project.id)
+    return render(request, 'project_new.html')
+
+
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
+
+@require_POST
+def project_star_toggle(request, project_id: int):
+    sim_user = request.POST.get('sim_user') or request.GET.get('sim_user')
+    if not request.user.is_authenticated and sim_user:
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth import login as auth_login
+        U = get_user_model()
+        user, _ = U.objects.get_or_create(username=sim_user)
+        auth_login(request, user)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'auth required'}, status=401)
+    project = get_object_or_404(Project, id=project_id)
+    star, created = ProjectStar.objects.get_or_create(project=project, user=request.user)
+    if not created:
+        # Toggle off
+        star.delete()
+        starred = False
+    else:
+        starred = True
+    count = ProjectStar.objects.filter(project=project).count()
+    return JsonResponse({'project_id': project.id, 'starred': starred, 'stars': count})
 
 
 def project_detail(request, project_id: int):

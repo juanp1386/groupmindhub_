@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Create Project</h1>
+<form method="post" id="projectForm" style="display:flex;flex-direction:column;gap:14px;max-width:760px;">{% csrf_token %}
+  <input type="hidden" name="sections_json" id="sectionsJson" />
+  <input type="hidden" name="sim_user" id="simUserHidden" />
+  <label>Name<br><input name="name" required placeholder="e.g., Community Garden Bylaws" style="width:100%;"/></label>
+  <label>Description<br><textarea name="description" rows="2" placeholder="Short description" style="width:100%;"></textarea></label>
+  <div>
+    <h3 style="margin:4px 0 8px;">Sections</h3>
+    <div id="sectionsContainer" style="display:flex;flex-direction:column;gap:12px;"></div>
+    <button type="button" id="addSectionBtn" style="margin-top:8px;">➕ Add Section</button>
+    <p class="muted" style="margin-top:4px;font-size:11px;">Drag reorder not yet implemented. Use ▲/▼. Empty sections are ignored.</p>
+  </div>
+  <div><button>Create Project</button></div>
+</form>
+<script>
+(function(){
+  const key='gmh_sim_user';
+  const sim=localStorage.getItem(key)||'';
+  const simHidden=document.getElementById('simUserHidden');
+  if(simHidden) simHidden.value=sim;
+  const container=document.getElementById('sectionsContainer');
+  const addBtn=document.getElementById('addSectionBtn');
+  if(!container||!addBtn){console.warn('Section builder init skipped (elements missing)');return;}
+  const sections=[];
+  function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function render(highlightIndex=null){
+    container.innerHTML='';
+    sections.forEach((s,i)=>{
+      const wrap=document.createElement('div');
+      wrap.className='card';
+      wrap.style.padding='12px';
+      if(i===highlightIndex){wrap.style.outline='2px solid #4aa';wrap.style.animation='fadeBorder 2s forwards';}
+      wrap.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <strong style="font-size:14px;">Section ${i+1}</strong>
+        <div style="display:flex;gap:4px;">
+          <button type="button" data-act="up" ${i===0?'disabled':''} style="font-size:10px;">▲</button>
+          <button type="button" data-act="down" ${i===sections.length-1?'disabled':''} style="font-size:10px;">▼</button>
+          <button type="button" data-act="remove" style="font-size:10px;color:#f88;">✖</button>
+        </div>
+      </div>
+      <label style="display:block;margin-top:6px;font-size:12px;">Heading<br><input data-field="heading" value="${escapeHtml(s.heading)}" style="width:100%;" placeholder="Heading"/></label>
+      <label style="display:block;margin-top:6px;font-size:12px;">Body<br><textarea data-field="body" rows="4" style="width:100%;" placeholder="Body (optional)">${escapeHtml(s.body)}</textarea></label>`;
+      wrap.querySelectorAll('input,textarea').forEach(inp=>{
+        inp.addEventListener('input',()=>{s[inp.getAttribute('data-field')]=inp.value;});
+      });
+      wrap.querySelectorAll('button[data-act]').forEach(btn=>{
+        btn.addEventListener('click',()=>{
+          const act=btn.getAttribute('data-act');
+            if(act==='remove'){sections.splice(i,1);} 
+            else if(act==='up' && i>0){[sections[i-1],sections[i]]=[sections[i],sections[i-1]];} 
+            else if(act==='down' && i<sections.length-1){[sections[i+1],sections[i]]=[sections[i],sections[i+1]];}
+          render();
+        });
+      });
+      container.appendChild(wrap);
+    });
+  }
+  addBtn.addEventListener('click',()=>{
+    sections.push({heading:'',body:''});
+    render(sections.length-1);
+    // scroll last into view
+    requestAnimationFrame(()=>{
+      const last=container.lastElementChild; if(last){ last.scrollIntoView({behavior:'smooth',block:'center'}); }
+    });
+  });
+  document.getElementById('projectForm').addEventListener('submit',()=>{
+    document.getElementById('sectionsJson').value=JSON.stringify(sections);
+  });
+  // Seed with one section
+  sections.push({heading:'Purpose',body:''});
+  render();
+})();
+</script>
+<style>
+@keyframes fadeBorder { 0%{outline-color:#4aa;} 80%{outline-color:rgba(74,170,170,0);} 100%{outline:none;} }
+</style>
+{% endblock %}

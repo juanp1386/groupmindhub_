@@ -1,0 +1,23 @@
+{% for node in sections %}
+  <div class="section-node depth-{{ node.depth|default:1 }}" data-section-id="{{ node.id }}">
+    <div class="section-header">
+      <div>
+        <div class="section-heading">
+          <span class="section-heading-text">
+            {% if node.numbering %}{{ node.numbering }} {% endif %}
+            {{ node.heading|default_if_none:'(untitled section)' }}
+          </span>
+        </div>
+      </div>
+      <div class="section-actions">
+        <button type="button" class="section-edit" data-section-id="{{ node.id }}" onclick="try{console.log('[GMH] inline onclick fired', '{{ node.id|escapejs }}');}catch(e){}; return window.__gmhStartDraft ? window.__gmhStartDraft('{{ node.id|escapejs }}') : false;"><span>Edit</span></button>
+      </div>
+    </div>
+    {% if node.body %}
+    <div class="section-body">{{ node.body }}</div>
+    {% endif %}
+    {% if node.children %}
+      {% include '_section_tree.html' with sections=node.children %}
+    {% endif %}
+  </div>
+{% endfor %}

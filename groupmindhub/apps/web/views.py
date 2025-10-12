@@ -4,7 +4,8 @@ from django.contrib.auth import authenticate, login, logout
 from django.shortcuts import render, redirect, get_object_or_404
 import json
 from django.utils import timezone
-from groupmindhub.apps.core.models import Project, Entry, Patch, Vote, Block, Section, ProjectStar
+from groupmindhub.apps.core.models import Project, Entry, Change, Vote, Block, Section, ProjectStar
+from groupmindhub.apps.core.api import serialize_entry
 from django.http import HttpResponse
 from pathlib import Path
 
@@ -21,8 +22,8 @@ def index(request):
     user_star_ids = set()
     if request.user.is_authenticated:
         user_star_ids = set(ProjectStar.objects.filter(user=request.user, project__in=projects).values_list('project_id', flat=True))
-    # Build activity (simple heuristic for now): recent_patch_weight = patches<24h *1 + patches<7d *0.2
-    patch_qs = Patch.objects.filter(project__in=projects)
+    # Build activity (simple heuristic for now): changes<24h *1 + changes<7d *0.2
+    patch_qs = Change.objects.filter(project__in=projects)
     recent_counts = {
         'day': dict(patch_qs.filter(created_at__gte=day_ago).values_list('project_id').annotate(c=Count('id'))),
         'week': dict(patch_qs.filter(created_at__gte=week_ago).values_list('project_id').annotate(c=Count('id'))),
@@ -61,25 +62,79 @@ def project_new(request):
         if name:
             project = Project.objects.create(name=name, description=desc)
             entry = Entry.objects.create(project=project, title='Trunk', author=request.user, status='published')
-            # Parse sections JSON
+            # Parse sections JSON into nested tree
             try:
-                sections = json.loads(sections_json) if sections_json else []
+                parsed = json.loads(sections_json) if sections_json else []
             except Exception:
-                sections = []
-            pos = 0
-            for idx, s in enumerate(sections, start=1):
-                heading = (s.get('heading') or '').strip()
-                body = (s.get('body') or '').strip()
-                if not heading and not body:
-                    continue
-                stable_id = f's{idx}'
-                pos += 1
-                Section.objects.create(entry=entry, stable_id=stable_id, heading=heading or f'Section {idx}', body=body, position=pos)
-                # Create equivalent Blocks for current entry_detail consumption
-                Block.objects.create(entry=entry, stable_id=f'h_{stable_id}', type='h2', text=heading or f'Section {idx}', parent_stable_id=None, position=pos)
-                if body:
-                    pos += 1
-                    Block.objects.create(entry=entry, stable_id=f'p_{stable_id}', type='p', text=body, parent_stable_id=f'h_{stable_id}', position=pos)
+                parsed = []
+
+            from itertools import count
+
+            def normalize(nodes):
+                out = []
+                if not isinstance(nodes, list):
+                    return out
+                for node in nodes:
+                    heading = (node.get('heading') if isinstance(node, dict) else '') or ''
+                    body = (node.get('body') if isinstance(node, dict) else '') or ''
+                    children = normalize(node.get('children') if isinstance(node, dict) else [])
+                    if not heading.strip() and not body.strip() and not children:
+                        continue
+                    out.append({
+                        'heading': heading.strip(),
+                        'body': body.strip(),
+                        'children': children,
+                    })
+                return out
+
+            sections_tree = normalize(parsed)
+
+            section_counter = count(1)
+            block_counter = count(1)
+
+            def stable_id_from_path(path):
+                return 's' + '_'.join(str(p) for p in path)
+
+            def default_heading_from_path(path):
+                return f"Section {'.'.join(str(p) for p in path)}"
+
+            def build(nodes, parent_section=None, path_prefix=()):
+                for idx, node in enumerate(nodes, start=1):
+                    path = path_prefix + (idx,)
+                    stable_id = stable_id_from_path(path)
+                    heading_text = node['heading'] or default_heading_from_path(path)
+                    body_text = node['body']
+                    section = Section.objects.create(
+                        entry=entry,
+                        stable_id=stable_id,
+                        heading=heading_text,
+                        body=body_text,
+                        parent=parent_section,
+                        position=next(section_counter),
+                    )
+                    heading_block_id = f'h_{stable_id}'
+                    parent_heading = f'h_{parent_section.stable_id}' if parent_section else None
+                    Block.objects.create(
+                        entry=entry,
+                        stable_id=heading_block_id,
+                        type='h2',
+                        text=heading_text,
+                        parent_stable_id=parent_heading,
+                        position=next(block_counter),
+                    )
+                    if body_text:
+                        Block.objects.create(
+                            entry=entry,
+                            stable_id=f'p_{stable_id}',
+                            type='p',
+                            text=body_text,
+                            parent_stable_id=heading_block_id,
+                            position=next(block_counter),
+                        )
+                    build(node['children'], section, path)
+
+            build(sections_tree)
+
             return redirect('project_detail', project_id=project.id)
     return render(request, 'project_new.html')
 
@@ -124,10 +179,10 @@ def project_detail(request, project_id: int):
 def entry_detail(request, entry_id: int):
     """Interactive entry page using the exact prototype UI & client logic.
 
-    NOTE: For parity the patch composer + ops live purely client-side as in the original prototype.
-    Server persistence of patches/ops can be wired later to existing API endpoints.
+    NOTE: For parity the change composer + ops live purely client-side as in the original prototype.
+    Server persistence of changes/ops can be wired later to existing API endpoints.
     """
-    entry = get_object_or_404(Entry, id=entry_id)
+    entry = get_object_or_404(Entry.objects.select_related('project'), id=entry_id)
 
     # Build block list from DB (fallback to a default prototype content if empty)
     if entry.blocks.exists():
@@ -156,26 +211,32 @@ def entry_detail(request, entry_id: int):
         ]
 
     # Prepare JSON for template injection (safe because we control keys)
-    entry_json = {
-        'id': entry.id,
-        'project_id': entry.project_id,
-        'title': entry.title or 'Trunk v1',
-        'version': entry.entry_version_int,
-        'votes': entry.votes_cache_int,
-        'blocks': blocks,
-    }
+    if entry.pk:
+        entry_json = serialize_entry(entry)
+        entry_json['title'] = entry_json.get('title') or 'Trunk'
+    else:
+        entry_json = {
+            'id': entry.id,
+            'project_id': entry.project_id,
+            'title': entry.title or 'Trunk v1',
+            'version': entry.entry_version_int,
+            'votes': entry.votes_cache_int,
+            'blocks': blocks,
+            'sections': [],
+        }
 
     return render(request, 'entry_detail.html', {
         'entry': entry,
         'ENTRY_JSON': json.dumps(entry_json),
+        'entry_sections_tree': entry_json.get('sections_tree') or [],
     })
 
 
-def patch_detail(request, patch_id: int):
-    patch = get_object_or_404(Patch, id=patch_id)
+def change_detail(request, change_id: int):
+    patch = get_object_or_404(Change, id=change_id)
     if request.method == "POST":
         act = request.POST.get("action")
-        if act == "publish_patch" and patch.status == "draft":
+        if act == "publish_change" and patch.status == "draft":
             if not request.user.is_authenticated:
                 return redirect("login")
             patch.status = "published"
@@ -188,9 +249,9 @@ def patch_detail(request, patch_id: int):
             if not request.user.is_authenticated:
                 return redirect("login")
             val = int(request.POST.get("value"))
-            Vote.objects.update_or_create(user=request.user, target_type="patch", target_id=patch.id, defaults={"value": val})
+            Vote.objects.update_or_create(user=request.user, target_type="change", target_id=patch.id, defaults={"value": val})
             return redirect(request.path)
-    return render(request, "patch_detail.html", {"patch": patch})
+    return render(request, "change_detail.html", {"change": patch})
 
 
 def login_view(request):

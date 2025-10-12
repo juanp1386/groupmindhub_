@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
-<h1>Change #{{ patch.id }}</h1>
-<p>{{ patch.summary }} · Status: <strong>{{ patch.status }}</strong></p>
+<h1>Change #{{ change.id }}</h1>
+<p>{{ change.summary }} · Status: <strong>{{ change.status }}</strong></p>
 
 <div class="card">
   <h3>Votes</h3>
@@ -21,7 +21,7 @@
   {% endif %}
 </div>
 
-{% if patch.status == 'draft' and user.is_authenticated %}
+{% if change.status == 'draft' and user.is_authenticated %}
 <div class="card">
   <h3>Publish Change</h3>
   <form method="post">{% csrf_token %}
@@ -31,3 +31,4 @@
 </div>
 {% endif %}
 {% endblock %}
+

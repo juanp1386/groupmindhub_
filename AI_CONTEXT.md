@@ -1,30 +1,50 @@
-# AI_CONTEXT.md — GroupMindHub (Prototype‑Driven MVP)
+# AI_CONTEXT.md — GroupMindHub (Django build)
 
-Keep this open in VS Code for Copilot.
+Keep this close when extending the app or prompting Copilot.
 
-- Auto‑merge threshold: **40%** of total users.
-- Patch ops: `UPDATE_TEXT`, `INSERT_BLOCK`, `DELETE_BLOCK`, `MOVE_BLOCK`.
-- No admin merges in MVP; merges are democratic + automatic.
-- Merged patches leave Proposed and appear only in History.
-- Avoid render↔merge recursion: `renderPatches()` may call `autoMergeTick()` which **must not** re‑enter `renderPatches()`.
+## Key concepts
+- Auto-merge threshold: **40 %** of `SIM_USER_POOL_SIZE` (defined in `groupmindhub/apps/core/logic.py`).
+- Change ops: `UPDATE_TEXT`, `INSERT_BLOCK`, `DELETE_BLOCK`, `MOVE_BLOCK` (mirrors prototype semantics).
+- Section scope drives validation — all ops/anchors must stay within the targeted section tree.
+- Theme toggle + palette variables live in `templates/entry_detail.html` and are reused via CSS custom properties.
 
-Key state (in `prototype.html`):
-- `users`, `currentUserId`
-- `entry` (blocks with stable IDs)
-- `patches` (published/merged/needs_update)
-- `draft` (staged ops)
+## Frontend modules
+- `static/js/entry_detail.js`
+  - Bootstraps entry state from `__entry_json` (see `serialize_entry`).
+  - Renders sections (`renderEntry`) and composer (`renderComposerTree`).
+  - `computeOps(originalRoot, updatedRoot, context)` builds ops/anchors between draft/original trees.
+  - `buildChangePreview(includeOutline)` computes ops + diff outlines before publish.
+  - `updateComposerPreview()` manages scope badge + publish button state.
+  - Theme toggle: persists to `localStorage` (`gmh_theme`) and swaps favicons via DOM manipulation.
+- `templates/entry_detail.html`
+  - Defines palette variables for light/dark themes and wraps composer markup.
+  - Header hosts theme toggle, simulated user select, and logo swap (light/dark assets under `static/img/`).
 
-Core functions:
-- `applyOps(blocks, ops)` — pure transform; used for preview + merge.
-- `outlineDiff(before, after)` — +/‑/~ /↔ outlines.
-- `recomputeOverlaps()` — sets `overlaps` and `competing`.
-- `isPassing(p)` — approval check.
-- `applyMergeCore(p)` — mutates entry, marks overlaps `needs_update`, stamps merged meta.
-- `autoMergeTick()` — merges all passing patches (no recursion).
-- `renderEntry()`, `renderComposer()`, `renderPatches()` — DOM writers.
-- Composer helpers including `removeOp(seq)`.
+## Backend modules
+- `groupmindhub/apps/core/api.py`
+  - `serialize_entry(entry)` → nested sections tree consumed by the frontend.
+  - `_normalize_section_block_id` ensures heading ids use `h_` prefix.
+  - `api_project_changes_create` validates ops, creates `Change`, auto-upvotes publisher, and triggers `auto_merge()`.
+  - `api_change_vote` + `api_change_merge` for vote/merge actions.
+- `groupmindhub/apps/core/logic.py`
+  - `build_section_index(entry)` builds numbering + descendant membership for validation/hints.
+  - `apply_ops(entry, ops)` applies ops during merge.
+  - `auto_merge()` checks passing status and applies merges.
+- `groupmindhub/apps/web/views.py`
+  - `entry_detail` seeds context + JSON payload for frontend script.
+  - `project_new` builds initial sections/blocks from submitted structure.
+  - `project_star_toggle` handles AJAX star toggles.
 
-Extension seams:
-- `localStorage` persistence (entry, patches, users).
-- Minimal backend stubs (Express/FastAPI) matching SPEC.md.
-- Extra block types (`code`, `ul/li`, `img`) and corresponding UI.
+## Testing
+- `groupmindhub/apps/core/tests/test_api.py::ChangeApiTests` exercises change creation for new subsections.
+- Run all tests with `python manage.py test` (SQLite default).
+
+## Common hooks
+- **Simulated user login**: `_apply_sim_user(request)` co-opts `sim_user` param to create/login a matching Django user.
+- **Change outlines**: `computeOutlines(ops)` (JS) mirrors backend outline snapshots for diff display.
+- **Assets**: update `favicon-light.png`, `favicon-dark.png`, `logo-light.png`, `logo-dark.png` when branding changes; keep filenames consistent with template IDs.
+
+## Extension ideas
+- Add backend persistence for themes or user-specific preferences.
+- Enrich diff rendering with inline highlights (existing structure is ready to expand).
+- Expand `ChangeApiTests` to cover deletes/moves and ensure validation remains robust.

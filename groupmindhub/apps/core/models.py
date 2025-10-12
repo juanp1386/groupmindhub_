@@ -45,9 +45,9 @@ class Block(models.Model):
         return f"{self.stable_id}:{self.type}"
 
 
-class Patch(models.Model):
-    project = models.ForeignKey(Project, related_name='patches', on_delete=models.CASCADE)
-    target_entry = models.ForeignKey(Entry, related_name='patches', on_delete=models.CASCADE)
+class Change(models.Model):
+    project = models.ForeignKey(Project, related_name='changes', on_delete=models.CASCADE)
+    target_entry = models.ForeignKey(Entry, related_name='changes', on_delete=models.CASCADE)
     author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     summary = models.CharField(max_length=300)
     ops_json = models.JSONField(default=list, blank=True)
@@ -59,6 +59,7 @@ class Patch(models.Model):
     status = models.CharField(max_length=20, default='draft')  # draft|published|merged|needs_update
     votes_cache_int = models.IntegerField(default=0)
     overlaps = models.JSONField(default=list, blank=True)
+    target_section_id = models.CharField(max_length=100, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     published_at = models.DateTimeField(null=True, blank=True)
     merged_at = models.DateTimeField(null=True, blank=True)
@@ -68,12 +69,12 @@ class Patch(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"Patch #{self.pk} ({self.status})"
+        return f"Change #{self.pk} ({self.status})"
 
 
 class Vote(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    target_type = models.CharField(max_length=20)  # 'entry' | 'patch'
+    target_type = models.CharField(max_length=20)  # 'entry' | 'change'
     target_id = models.PositiveIntegerField()
     value = models.SmallIntegerField(default=0)  # -1 | 0 | +1
     created_at = models.DateTimeField(auto_now_add=True)
@@ -88,7 +89,7 @@ class Vote(models.Model):
 
 class EntryHistory(models.Model):
     entry = models.ForeignKey(Entry, related_name='history', on_delete=models.CASCADE)
-    patch = models.ForeignKey(Patch, null=True, blank=True, related_name='history_records', on_delete=models.SET_NULL)
+    change = models.ForeignKey('Change', null=True, blank=True, related_name='history_records', on_delete=models.SET_NULL)
     version_int = models.PositiveIntegerField()
     outline_before = models.TextField(blank=True)
     outline_after = models.TextField(blank=True)
@@ -108,6 +109,7 @@ class Section(models.Model):
     heading = models.CharField(max_length=300)
     body = models.TextField(blank=True)
     position = models.FloatField(default=0, db_index=True)
+    parent = models.ForeignKey('self', null=True, blank=True, related_name='children', on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

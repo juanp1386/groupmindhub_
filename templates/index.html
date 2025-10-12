@@ -3,7 +3,7 @@
 <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
   <h1 style="margin:8px 0;">Projects</h1>
   <div style="display:flex;gap:8px;align-items:center;">
-    <a href="/projects/new/" class="btn" style="padding:8px 12px;border:1px solid #333;border-radius:4px;">➕ New Project</a>
+    <a href="/projects/new/" class="btn">➕ New Project</a>
     <select id="projFilter" style="min-width:140px;">
       <option value="all">All</option>
       <option value="starred">Starred</option>
@@ -27,7 +27,7 @@
       {% for p in projects %}
       <tr data-project-id="{{ p.id }}" data-activity="{{ p.activity }}" data-starred="{{ p.starred|yesno:'1,0' }}">
         <td>
-          <button class="starBtn" data-starred="{{ p.starred|yesno:'1,0' }}" aria-label="Star project" style="background:none;border:none;font-size:16px;cursor:pointer;">
+          <button class="starBtn" data-starred="{{ p.starred|yesno:'1,0' }}" aria-label="Star project" style="background:none;border:none;font-size:18px;cursor:pointer;color:inherit;">
             {% if p.starred %}★{% else %}☆{% endif %}
           </button>
         </td>
@@ -45,44 +45,77 @@
 </div>
 {% endblock %}
 
+{% block extra_js %}
 <script>
 (function(){
   const key='gmh_sim_user';
-  const sim=localStorage.getItem(key)||'';
+  const simUser=localStorage.getItem(key)||'';
   const filterSel=document.getElementById('projFilter');
-  const rows=[...document.querySelectorAll('#projectsTable tbody tr')];
+  const table=document.getElementById('projectsTable');
+  if(!filterSel || !table){return;}
+  const rows=[...table.querySelectorAll('tbody tr')];
+
   function applyFilter(){
-    const f=filterSel.value;
-    rows.forEach(r=>{
-      const starred=r.getAttribute('data-starred')==='1';
-      const activity=parseFloat(r.getAttribute('data-activity'))||0;
-      let show=true;
-      if(f==='starred' && !starred) show=false;
-      if(f==='active' && activity<=0) show=false;
-      r.style.display=show?'':'none';
+    const filter=filterSel.value;
+    rows.forEach((row)=>{
+      const starred=row.getAttribute('data-starred')==='1';
+      const activity=parseFloat(row.getAttribute('data-activity'))||0;
+      let visible=true;
+      if(filter==='starred' && !starred){ visible=false; }
+      if(filter==='active' && activity<=0){ visible=false; }
+      row.style.display=visible? '':'none';
     });
   }
-  filterSel && filterSel.addEventListener('change', applyFilter);
+
+  filterSel.addEventListener('change', applyFilter);
   applyFilter();
-  // Star toggling
-  document.querySelectorAll('.starBtn').forEach(btn=>{
-    btn.addEventListener('click', async (e)=>{
-      e.preventDefault();
-      const tr=btn.closest('tr');
-      const pid=tr.getAttribute('data-project-id');
+
+  function getCookie(name){
+    const parts=(document.cookie||'').split(';');
+    for (let i=0;i<parts.length;i+=1){
+      const cookie=parts[i].trim();
+      if(!cookie) continue;
+      if(cookie.startsWith(name+'=')){
+        return decodeURIComponent(cookie.slice(name.length+1));
+      }
+    }
+    return '';
+  }
+
+  const csrfToken=getCookie('csrftoken');
+
+  table.querySelectorAll('.starBtn').forEach((btn)=>{
+    btn.addEventListener('click', async (event)=>{
+      event.preventDefault();
+      const row=btn.closest('tr');
+      if(!row){return;}
+      const projectId=row.getAttribute('data-project-id');
+      if(!projectId){return;}
       const formData=new FormData();
-      formData.append('sim_user', sim);
+      if(simUser){ formData.append('sim_user', simUser); }
       try{
-        const res=await fetch(`/api/projects/${pid}/star-toggle`, {method:'POST', body:formData});
-        if(!res.ok) return;
-        const data=await res.json();
-        btn.dataset.starred=data.starred? '1':'0';
-        tr.setAttribute('data-starred', data.starred? '1':'0');
-        btn.textContent=data.starred? '★':'☆';
-        tr.querySelector('.starCount').textContent=data.stars;
+        const response=await fetch(`/api/projects/${projectId}/star-toggle`, {
+          method:'POST',
+          body:formData,
+          headers: csrfToken ? {'X-CSRFToken': csrfToken} : {},
+        });
+        if(!response.ok){
+          console.warn('Star toggle failed', response.status);
+          return;
+        }
+        const data=await response.json();
+        const starred=data.starred ? '1' : '0';
+        btn.dataset.starred=starred;
+        row.setAttribute('data-starred', starred);
+        btn.textContent=data.starred ? '★' : '☆';
+        const countEl=row.querySelector('.starCount');
+        if(countEl){ countEl.textContent=data.stars; }
         applyFilter();
-      }catch(err){console.error(err);}
+      }catch(error){
+        console.error('Star toggle error', error);
+      }
     });
   });
 })();
 </script>
+{% endblock %}

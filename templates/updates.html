@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .updates-header{display:flex;flex-direction:column;gap:8px;margin:32px 0 24px}
+  .updates-header h1{margin:0;font-size:28px;font-weight:700}
+  .updates-header p{margin:0;color:var(--muted);max-width:720px}
+  .filters-card{display:flex;flex-direction:column;gap:16px;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:30px;box-shadow:0 18px 36px var(--shadow)}
+  .filters-row{display:flex;flex-wrap:wrap;gap:16px}
+  .filters-row label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+  .filters-row select{min-width:200px;min-height:110px}
+  .state-chips{display:flex;flex-wrap:wrap;gap:12px}
+  .state-chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--panel-soft);font-size:12px}
+  .state-chip input{margin:0}
+  .filters-actions{display:flex;gap:12px;flex-wrap:wrap}
+  .updates-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
+  .updates-block{background:var(--panel);border:1px solid var(--border);border-radius:18px;box-shadow:0 22px 44px var(--shadow);display:flex;flex-direction:column;min-height:280px}
+  .updates-block .hd{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+  .updates-block .hd h2{margin:0;font-size:16px;font-weight:600;text-transform:uppercase;letter-spacing:.08em}
+  .updates-block .bd{padding:20px;display:flex;flex-direction:column;gap:16px;flex:1 1 auto}
+  .update-card{border:1px solid rgba(var(--accent-rgb),0.3);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;background:rgba(255,255,255,0.55)}
+  [data-theme='dark'] .update-card{background:rgba(22,38,40,0.85);border-color:rgba(255,255,255,0.14)}
+  .update-card h3{margin:0;font-size:15px;font-weight:600}
+  .update-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+  .update-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .update-actions a{padding:6px 12px;border-radius:8px;border:1px solid var(--border);font-size:12px;background:var(--panel-soft);color:var(--text)}
+  .update-actions a:hover{border-color:var(--accent);color:var(--accent)}
+  .empty-state{text-align:center;padding:18px;border-radius:12px;border:1px dashed rgba(var(--accent-rgb),0.3);color:var(--muted);background:rgba(255,255,255,0.5)}
+  [data-theme='dark'] .empty-state{background:rgba(22,38,40,0.6);border-color:rgba(255,255,255,0.18)}
+  .chip-list{display:flex;gap:8px;flex-wrap:wrap;font-size:11px}
+  .chip{padding:3px 8px;border-radius:999px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(var(--accent-rgb),0.18);color:var(--accent)}
+  [data-theme='dark'] .chip{background:rgba(var(--accent-rgb),0.25);color:var(--text);border-color:rgba(255,255,255,0.18)}
+  @media (max-width:680px){
+    .filters-row select{width:100%;min-width:0}
+    .filters-actions{flex-direction:column;align-items:stretch}
+  }
+</style>
+<div class="updates-header">
+  <h1>My updates</h1>
+  <p>Track sections that need your attention. Filter by project or section to jump straight into the workspace.</p>
+</div>
+<form id="updatesFilters" class="filters-card" method="get">
+  <div class="filters-row">
+    <label for="projectFilter">Projects</label>
+    <select name="project" id="projectFilter" multiple>
+      {% for name in project_choices %}
+        <option value="{{ name }}" {% if name in selected_projects %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filters-row">
+    <label for="sectionFilter">Section search</label>
+    <input type="search" id="sectionFilter" name="section" placeholder="e.g., Meetings" value="{{ section_query }}" />
+  </div>
+  <div class="state-chips" role="group" aria-label="State filters">
+    <label class="state-chip"><input type="checkbox" name="state" value="open" {% if 'open' in selected_states or not selected_states %}checked{% endif %}/> Open votings</label>
+    <label class="state-chip"><input type="checkbox" name="state" value="needs" {% if 'needs' in selected_states or not selected_states %}checked{% endif %}/> Needs action</label>
+    <label class="state-chip"><input type="checkbox" name="state" value="activity" {% if 'activity' in selected_states or not selected_states %}checked{% endif %}/> Activity</label>
+  </div>
+  <div class="filters-actions">
+    <button class="primary" type="submit">Apply filters</button>
+    <button class="ghost" type="button" id="filtersReset">Reset</button>
+  </div>
+</form>
+<div class="updates-grid">
+  {% if show_open %}
+  <section class="updates-block" aria-label="Open votings">
+    <div class="hd"><h2>Open votings</h2><span class="pill">{{ open_votings|length }} active</span></div>
+    <div class="bd">
+      {% if open_votings %}
+        {% for item in open_votings %}
+          <article class="update-card">
+            <h3>{{ item.summary }}</h3>
+            <div class="update-meta">
+              <span>{{ item.project }}</span>
+              <span>{{ item.section }}</span>
+              <span>⏳ {{ item.closes_in }}</span>
+            </div>
+            <div class="update-actions">
+              <a href="{{ item.link }}" class="primary">Vote now</a>
+              <a href="{{ item.link }}&view=diff">Diff</a>
+            </div>
+          </article>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">No open votings match your filters.</div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if show_needs %}
+  <section class="updates-block" aria-label="Your proposals needing action">
+    <div class="hd"><h2>Your proposals</h2><span class="pill">Action needed</span></div>
+    <div class="bd">
+      {% if your_proposals %}
+        {% for item in your_proposals %}
+          <article class="update-card">
+            <h3>{{ item.summary }}</h3>
+            <div class="update-meta">
+              <span>{{ item.project }}</span>
+              <span>{{ item.section }}</span>
+            </div>
+            <div class="chip-list">
+              {% for chip in item.chips %}
+                <span class="chip">{{ chip }}</span>
+              {% endfor %}
+            </div>
+            <div class="update-actions">
+              <a href="{{ item.link }}&action=fix">Fix &amp; resubmit</a>
+              <a href="{{ item.link }}">Open editor</a>
+            </div>
+          </article>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">No proposals need your attention right now.</div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if show_activity %}
+  <section class="updates-block" aria-label="Followed activity">
+    <div class="hd"><h2>Followed activity</h2><span class="pill">Recent</span></div>
+    <div class="bd">
+      {% if followed_activity %}
+        {% for item in followed_activity %}
+          <article class="update-card">
+            <h3>{{ item.summary }}</h3>
+            <div class="update-meta">
+              <span>{{ item.project }}</span>
+              <span>{{ item.section }}</span>
+              <span>{{ item.timestamp|timesince }} ago</span>
+            </div>
+            <div class="update-actions">
+              <a href="{{ item.link }}">Open in workspace</a>
+            </div>
+          </article>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">No recent activity for your followed sections.</div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  const storageKey='gmh_updates_filters';
+  const form=document.getElementById('updatesFilters');
+  if(!form){return;}
+  const searchParams=new URLSearchParams(window.location.search||'');
+  searchParams.delete('sim_user');
+  const hasQuery=Array.from(searchParams.keys()).length>0;
+  const persistFilters=()=>{
+    const data=new FormData(form);
+    const payload={
+      project:data.getAll('project'),
+      section:data.get('section')||'',
+      state:data.getAll('state'),
+    };
+    try{localStorage.setItem(storageKey,JSON.stringify(payload));}catch(err){console.warn('filters persist failed',err);}
+  };
+  try{
+    const saved=JSON.parse(localStorage.getItem(storageKey)||'null');
+    if(saved && !hasQuery){
+      const projects=new Set(saved.project||[]);
+      Array.from(form.querySelectorAll('select[name="project"] option')).forEach((opt)=>{opt.selected=projects.has(opt.value);});
+      const sectionInput=form.querySelector('input[name="section"]');
+      if(sectionInput && saved.section){sectionInput.value=saved.section;}
+      const states=new Set(saved.state||[]);
+      Array.from(form.querySelectorAll('input[name="state"]')).forEach((checkbox)=>{checkbox.checked=states.size?states.has(checkbox.value):checkbox.checked;});
+    }
+  }catch(err){console.warn('filters restore failed',err);}
+  form.addEventListener('input',persistFilters);
+  form.addEventListener('change',persistFilters);
+  form.addEventListener('submit',persistFilters);
+  const resetBtn=document.getElementById('filtersReset');
+  if(resetBtn){
+    resetBtn.addEventListener('click',()=>{
+      localStorage.removeItem(storageKey);
+      form.reset();
+      form.submit();
+    });
+  }
+})();
+</script>
+{% endblock %}

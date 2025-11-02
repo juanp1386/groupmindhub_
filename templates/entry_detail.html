@@ -7,13 +7,14 @@
   <title>{{ entry.title }} – GroupMindHub Entry</title>
   <link id="siteFavicon" rel="icon" type="image/png" href="{% static 'img/favicon-light.png' %}" />
     <style>
-    :root{
+  :root{
       --palette-1:#dadccf;
       --palette-2:#000000;
       --palette-3:#85c4c0;
       --palette-4:#fdfceb;
       --palette-5:#7ebfbd;
       --accent-rgb:133,196,192;
+      --grain-pattern:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
 
       --bg:var(--palette-4);
       --panel:var(--palette-1);
@@ -36,12 +37,14 @@
       --accent:#7ebfbd;
       --accent-strong:#9bd7d4;
       --shadow:rgba(0,0,0,0.45);
+      --grain-pattern:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.09'/%3E%3C/svg%3E");
     }
 
     *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--text);font:13.2px/1.55 'Inter',-apple-system,'Segoe UI',sans-serif}
-    header{position:sticky;top:0;z-index:10;background:linear-gradient(135deg,rgba(var(--accent-rgb),0.85),rgba(126,191,189,0.8));backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
-    [data-theme='dark'] header{background:linear-gradient(135deg,rgba(12,32,34,0.92),rgba(18,49,52,0.92));}
+    body{margin:0;background:var(--bg);color:var(--text);font:13.2px/1.55 'Inter',-apple-system,'Segoe UI',sans-serif;background-image:var(--grain-pattern);background-size:180px 180px;background-attachment:fixed;background-blend-mode:overlay}
+    body::before{content:'';position:fixed;inset:0;pointer-events:none;background-image:var(--grain-pattern);background-size:180px 180px;mix-blend-mode:overlay;opacity:0.32;z-index:-1;}
+  header{position:sticky;top:0;z-index:10;background:linear-gradient(135deg,rgba(var(--accent-rgb),0.85),rgba(126,191,189,0.8));backdrop-filter:blur(12px);border-bottom:1px solid var(--border);background-image:var(--grain-pattern);background-blend-mode:overlay}
+[data-theme='dark'] header{background:linear-gradient(135deg,rgba(12,32,34,0.92),rgba(18,49,52,0.92));background-image:var(--grain-pattern);background-blend-mode:overlay;}
     .wrap{max-width:1400px;margin:0 auto;padding:18px 32px}
     .site-head{display:flex;align-items:center;justify-content:space-between;gap:24px}
     .brand{display:flex;align-items:center;gap:18px}
@@ -49,7 +52,11 @@
     .brand-logo-dark{display:none}
     [data-theme='dark'] .brand-logo-light{display:none}
     [data-theme='dark'] .brand-logo-dark{display:block}
+    .head-controls{display:flex;align-items:center;gap:18px}
+    .head-links{display:flex;align-items:center;gap:10px}
     .sim-block{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+    .sim-block select{padding:5px 10px;font-size:13px;border-radius:8px;background:var(--panel-soft);color:var(--text);border:1px solid var(--border)}
+    .sim-label{font-size:12px;font-weight:600}
     select,button,input,textarea{background:var(--panel-soft);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-family:inherit;font-size:14px}
     select:focus,input:focus,textarea:focus{outline:2px solid rgba(var(--accent-rgb),0.45)}
     button{cursor:pointer;transition:all .18s ease}
@@ -68,14 +75,93 @@
     .project-banner{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding:0 24px 24px}
     .project-banner h1{margin:0;font-size:26px;color:var(--text)}
     .project-banner p{margin:6px 0 0;color:var(--muted);max-width:760px;font-size:13px;line-height:1.55}
-    @media (min-width:1100px){
-      .grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,0.85fr);gap:24px;padding:0 24px 32px}
+    .workspace-toolbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px 18px;gap:16px}
+    .workspace-toolbar .controls{display:flex;gap:8px;flex-wrap:wrap}
+    .workspace-shell{display:flex;gap:0;border:1px solid var(--border);border-radius:18px;background:rgba(255,255,255,0.3);overflow:hidden;box-shadow:0 18px 36px var(--shadow);background-image:var(--grain-pattern);background-blend-mode:overlay}
+    [data-theme='dark'] .workspace-shell{background:rgba(10,20,22,0.6)}
+    .workspace-pane{display:flex;flex-direction:column;min-width:220px;flex:1 1 33%;background:var(--panel);background-image:var(--grain-pattern);background-blend-mode:overlay}
+    .workspace-pane[data-pane='doc']{flex:1.2 1 0}
+    .workspace-pane[data-pane='editor']{flex:1 1 0;max-width:460px}
+    .workspace-pane .card{box-shadow:none;border-radius:0;border:0;border-right:1px solid var(--border);background:transparent;height:100%;display:flex;flex-direction:column}
+    .workspace-pane[data-pane='editor'] .card{border-right:0;border-left:1px solid var(--border)}
+    .workspace-pane[data-pane='candidates'] .card{border-right:0}
+    .workspace-pane .card .bd{overflow:auto;flex:1 1 auto;padding:18px 20px}
+    .workspace-pane .card .hd{position:sticky;top:0;background:var(--panel);z-index:2}
+    .workspace-gutter{width:8px;cursor:col-resize;background:rgba(var(--accent-rgb),0.15);transition:background .2s ease}
+    .workspace-gutter:focus{outline:2px solid rgba(var(--accent-rgb),0.6)}
+    .workspace-gutter:hover{background:rgba(var(--accent-rgb),0.25)}
+    .workspace-gutter[data-active='true']{background:rgba(var(--accent-rgb),0.45)}
+    .workspace-pane-max[data-pane]{display:none!important}
+    .workspace-shell[data-max='doc'] [data-pane='doc']{display:flex;flex:1 1 auto}
+    .workspace-shell[data-max='doc'] [data-pane='candidates'],
+    .workspace-shell[data-max='doc'] [data-pane='editor'],
+    .workspace-shell[data-max='doc'] .workspace-gutter{display:none}
+    .workspace-shell[data-max='doc'] .workspace-pane[data-pane='doc'],
+    .workspace-shell[data-max='candidates'] .workspace-pane[data-pane='candidates'],
+    .workspace-shell[data-max='editor'] .workspace-pane[data-pane='editor']{flex:1 1 100%;width:100%;max-width:none}
+    .workspace-shell[data-max='candidates'] [data-pane='candidates']{display:flex;flex:1 1 auto}
+    .workspace-shell[data-max='candidates'] [data-pane='doc'],
+    .workspace-shell[data-max='candidates'] [data-pane='editor'],
+    .workspace-shell[data-max='candidates'] .workspace-gutter{display:none}
+    .workspace-shell[data-max='editor'] [data-pane='editor']{display:flex;flex:1 1 auto}
+    .workspace-shell[data-max='editor'] [data-pane='doc'],
+    .workspace-shell[data-max='editor'] [data-pane='candidates'],
+    .workspace-shell[data-max='editor'] .workspace-gutter{display:none}
+    .workspace-shell[data-max]{border-radius:0;border:0;}
+    .workspace-shell[data-max] .workspace-pane{min-width:0;}
+    .workspace-shell[data-max] .workspace-pane .card{height:100%;border-radius:0;margin:0;}
+    .workspace-shell[data-max] .workspace-pane .card .bd{max-height:none;}
+    .workspace-shell[data-max] .entry-scroll{max-height:none;padding-right:18px;}
+    .workspace-shell[data-max='doc'] .entry-card .bd{padding:24px;}
+    .workspace-shell[data-max='editor'] .composer-card .bd{padding:24px;}
+    .pane-title{font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+    .workspace-pane[data-pane='doc'] .card .bd{padding:18px 18px 24px;overflow:auto}
+    .entry-scroll{max-height:calc(100vh - 280px);overflow:auto;padding-right:12px}
+    .section-tree{display:flex;flex-direction:column}
+    .section-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+    .section-status-chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(var(--accent-rgb),0.18);color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.35)}
+    [data-theme='dark'] .section-status-chip{background:rgba(var(--accent-rgb),0.25);color:var(--text);border-color:rgba(255,255,255,0.25)}
+    .candidate-pane{display:flex;flex-direction:column;height:100%}
+    .candidate-pane .card{height:50%;min-height:260px}
+    .candidate-pane .card + .card{border-top:1px solid var(--border)}
+    .candidate-pane .card .bd{padding:18px 20px;overflow:auto}
+    .candidate-list,.queue-list{display:flex;flex-direction:column;gap:12px}
+    .candidate-card{background:rgba(255,255,255,0.55);border:1px solid rgba(var(--accent-rgb),0.25);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 12px 24px rgba(0,0,0,0.08)}
+    [data-theme='dark'] .candidate-card{background:rgba(22,38,40,0.85);border-color:rgba(255,255,255,0.12)}
+    .candidate-card-focus{outline:2px solid rgba(var(--accent-rgb),0.8);box-shadow:0 0 0 4px rgba(var(--accent-rgb),0.18)}
+    .candidate-head{display:flex;justify-content:space-between;gap:12px}
+    .candidate-title{font-weight:600;font-size:14px;color:var(--text)}
+    .candidate-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--muted)}
+    .candidate-actions{display:flex;flex-wrap:wrap;gap:8px}
+    .candidate-actions button{padding:6px 10px;border-radius:8px;font-size:12px}
+    .candidate-score{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center}
+    .candidate-timer{font-weight:600;color:var(--accent)}
+    .candidate-badges{display:flex;gap:6px;flex-wrap:wrap;font-size:11px}
+    .badge{padding:2px 6px;border-radius:6px;background:rgba(var(--accent-rgb),0.18);border:1px solid rgba(var(--accent-rgb),0.35);color:var(--accent)}
+    [data-theme='dark'] .badge{background:rgba(var(--accent-rgb),0.25);color:var(--text);border-color:rgba(255,255,255,0.18)}
+    .queue-card{background:rgba(255,255,255,0.4)}
+    [data-theme='dark'] .queue-card{background:rgba(14,26,30,0.75)}
+    .queue-item{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px dashed rgba(var(--accent-rgb),0.35);border-radius:12px}
+    [data-theme='dark'] .queue-item{border-color:rgba(255,255,255,0.18)}
+    .queue-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .queue-pos{font-weight:600;font-size:12px;color:var(--muted)}
+    .queue-flags{display:flex;gap:6px;flex-wrap:wrap}
+    .empty-state{text-align:center;font-size:12px;color:var(--muted);padding:12px;border:1px dashed rgba(var(--accent-rgb),0.3);border-radius:10px;background:rgba(255,255,255,0.45)}
+    [data-theme='dark'] .empty-state{background:rgba(22,38,40,0.65);border-color:rgba(255,255,255,0.15)}
+    .pane-controls button{padding:4px 10px;border-radius:999px;font-size:11px}
+    .pane-controls button.is-active{background:rgba(var(--accent-rgb),0.22);border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 1px rgba(var(--accent-rgb),0.35);}
+    [data-theme='dark'] .pane-controls button.is-active{background:rgba(var(--accent-rgb),0.28);color:var(--text);}
+    .live-check-chip{align-self:flex-start;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;padding:4px 8px;border-radius:999px;background:rgba(255,200,80,0.22);color:#8a6922;border:1px solid rgba(255,200,80,0.35)}
+    .composer-actions{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:12px}
+    .composer-actions .primary{min-width:160px}
+    @media (max-width:1180px){
+      .workspace-shell{flex-direction:column}
+      .workspace-pane{max-width:none}
+      .workspace-gutter{height:8px;width:auto;cursor:row-resize}
+      .entry-scroll{max-height:none;padding-right:0}
+      .workspace-shell[data-max]{flex-direction:column}
     }
-    @media (max-width:1099px){
-      .grid{display:grid;grid-template-columns:1fr;gap:18px;padding:0 16px 32px}
-      .entry-scroll{max-height:none;overflow:visible;padding-right:0;margin-right:0}
-    }
-    .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:0 18px 36px var(--shadow)}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:0 18px 36px var(--shadow);background-image:var(--grain-pattern);background-blend-mode:overlay}
     .card .hd{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border)}
     .card .bd{padding:18px}
     .pill{display:inline-flex;align-items:center;gap:6px;background:rgba(var(--accent-rgb),0.18);border:1px solid rgba(var(--accent-rgb),0.35);padding:4px 10px;border-radius:999px;color:var(--accent);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
@@ -94,29 +180,55 @@
     .section-tree{display:flex;flex-direction:column;gap:0}
     .section-tree>.section-node:first-child{border-top:1px solid rgba(0,0,0,0.08)}
     [data-theme='dark'] .section-tree>.section-node:first-child{border-top:1px solid rgba(255,255,255,0.05)}
-    .section-node{padding:12px 18px;border-bottom:1px solid rgba(0,0,0,0.08);background:rgba(255,255,255,0.55);transition:background .16s ease,box-shadow .16s ease,color .16s ease;color:var(--text)}
+    .section-node{position:relative;padding:12px 18px;border-bottom:1px solid rgba(0,0,0,0.08);background:rgba(255,255,255,0.55);transition:background .16s ease,box-shadow .16s ease,color .16s ease;color:var(--text);background-image:var(--grain-pattern);background-blend-mode:overlay}
+    .section-node::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:var(--grain-pattern);background-size:180px 180px;mix-blend-mode:overlay;opacity:0.26;}
     [data-theme='dark'] .section-node{background:rgba(17,30,34,0.85);border-bottom:1px solid rgba(255,255,255,0.05)}
     .section-node.depth-1{padding-left:18px}
     .section-node.depth-2{padding-left:36px}
-    .section-node.depth-3{padding-left:54px}
-    .section-node.depth-4{padding-left:72px}
-    .section-node.depth-5{padding-left:90px}
-    .section-node.depth-6{padding-left:108px}
-    .section-node:hover{background:rgba(255,255,255,0.85);box-shadow:inset 2px 0 0 rgba(var(--accent-rgb),0.6)}
-    [data-theme='dark'] .section-node:hover{background:rgba(22,40,44,0.9)}
-    .section-node-active{background:rgba(var(--accent-rgb),0.22);box-shadow:inset 3px 0 0 var(--accent)}
-    .section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-    .section-heading{font-size:14.4px;font-weight:600;margin:0;color:var(--text)}
-    .section-body{margin-top:6px;white-space:pre-wrap;color:rgba(0,0,0,0.75);font-size:13px;line-height:1.52}
-    [data-theme='dark'] .section-body{color:rgba(244,248,247,0.86)}
-    .section-actions{display:flex;gap:6px;flex-wrap:wrap;opacity:0;transition:opacity .16s ease}
-    .section-node:hover .section-actions{opacity:1}
-    .section-edit{background:transparent;border:1px solid rgba(var(--accent-rgb),0.25);color:var(--muted);padding:4px 10px;border-radius:999px;font-size:11px;line-height:1;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease;text-transform:uppercase;letter-spacing:.08em}
-    .section-edit::before{content:'✏';font-size:11px}
-    .section-edit span{font-size:11px}
-    .section-edit:hover{color:var(--accent);background:rgba(var(--accent-rgb),0.18);border-color:rgba(var(--accent-rgb),0.45)}
-    [data-theme='dark'] .section-edit{border-color:rgba(255,255,255,0.25);color:var(--text)}
-    [data-theme='dark'] .section-edit:hover{border-color:rgba(255,255,255,0.45)}
+.section-node.depth-3{padding-left:54px}
+.section-node.depth-4{padding-left:72px}
+.section-node.depth-5{padding-left:90px}
+.section-node.depth-6{padding-left:108px}
+.section-node-anchor{position:relative;box-shadow:0 4px 0 rgba(var(--accent-rgb),0.4);}
+.section-node-anchor::after{content:'Insert here';position:absolute;bottom:-18px;left:18px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);background:var(--panel);padding:2px 6px;border-radius:6px;border:1px solid rgba(var(--accent-rgb),0.35);}
+#entrySections.anchor-top::before{content:'New section will appear at document start';display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin-bottom:8px;padding:2px 6px;border-radius:6px;border:1px solid rgba(var(--accent-rgb),0.35);background:var(--panel);}
+.section-node:hover{background:rgba(255,255,255,0.85);box-shadow:inset 2px 0 0 rgba(var(--accent-rgb),0.6)}
+[data-theme='dark'] .section-node:hover{background:rgba(22,40,44,0.9)}
+.section-node-active{background:rgba(var(--accent-rgb),0.22);box-shadow:inset 3px 0 0 var(--accent)}
+.section-node-focused{background:rgba(var(--accent-rgb),0.18);box-shadow:inset 3px 0 0 rgba(var(--accent-rgb),0.85)}
+.section-node.root-proposal{border:1px dashed rgba(var(--accent-rgb),0.4);border-radius:14px;padding:16px 18px;margin:12px 0;background:rgba(255,255,255,0.6);}
+[data-theme='dark'] .section-node.root-proposal{background:rgba(17,30,34,0.92);border-color:rgba(var(--accent-rgb),0.45);}
+.section-node.root-proposal .section-header{margin-bottom:10px;}
+.section-node.root-proposal.root-proposal-inline{margin:10px 0 18px;}
+.section-node.root-proposal.root-proposal-banner{margin-bottom:18px;}
+.root-proposal-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted);list-style:disc;}
+.root-proposal-list li{line-height:1.4;}
+.root-proposal-list strong{color:var(--text);}
+.root-proposal-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;}
+.root-proposal-actions button{font-size:11px;border-radius:999px;padding:6px 12px;}
+.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.section-heading{font-size:14.4px;font-weight:600;margin:0;color:var(--text)}
+.section-body{margin-top:6px;white-space:pre-wrap;color:rgba(0,0,0,0.75);font-size:13px;line-height:1.52}
+[data-theme='dark'] .section-body{color:rgba(244,248,247,0.86)}
+.section-actions{display:flex;gap:6px;flex-wrap:wrap;opacity:0;transition:opacity .16s ease}
+    .section-node.section-node-active .section-actions,
+    .section-node.section-node-focused .section-actions{opacity:1}
+.section-edit{background:transparent;border:1px solid rgba(var(--accent-rgb),0.25);color:var(--muted);padding:4px 10px;border-radius:999px;font-size:11px;line-height:1;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease;text-transform:uppercase;letter-spacing:.08em}
+.section-edit::before{content:'✏';font-size:11px}
+.section-edit span{font-size:11px}
+.section-edit:hover{color:var(--accent);background:rgba(var(--accent-rgb),0.18);border-color:rgba(var(--accent-rgb),0.45)}
+[data-theme='dark'] .section-edit{border-color:rgba(255,255,255,0.25);color:var(--text)}
+[data-theme='dark'] .section-edit:hover{border-color:rgba(255,255,255,0.45)}
+.section-add{background:transparent;border:1px solid rgba(var(--accent-rgb),0.25);color:var(--muted);padding:4px 10px;border-radius:999px;font-size:11px;line-height:1;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease;text-transform:uppercase;letter-spacing:.08em}
+.section-add::before{content:'＋';font-size:12px}
+.section-add span{font-size:11px}
+.section-add:hover{color:var(--accent);background:rgba(var(--accent-rgb),0.18);border-color:rgba(var(--accent-rgb),0.45)}
+[data-theme='dark'] .section-add{border-color:rgba(255,255,255,0.25);color:var(--text)}
+[data-theme='dark'] .section-add:hover{border-color:rgba(255,255,255,0.45)}
+.anchor-controls{align-items:center}
+.anchor-scope{background:rgba(var(--accent-rgb),0.18);color:var(--accent)}
+[data-theme='dark'] .anchor-scope{background:rgba(var(--accent-rgb),0.3);color:var(--text)}
+.anchor-controls button{font-size:11px;padding:4px 8px;border-radius:999px}
     .change-card{border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}
     .diff-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
     .diff-block{border-radius:10px;border:1px solid rgba(0,0,0,0.08);overflow:hidden;background:rgba(255,255,255,0.55)}
@@ -178,14 +290,20 @@
           <img class="brand-logo brand-logo-dark" src="{% static 'img/logo-dark.png' %}" alt="GroupMindHub" />
         </a>
       </div>
-      <div class="sim-block">
+      <div class="head-controls">
+        <div class="head-links">
+          <a href="/" class="pill">Home</a>
+          <a href="/updates/" class="pill">Updates</a>
+        </div>
         <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
           <span class="toggle-label" id="themeToggleLabel">Light</span>
         </button>
-        <span>Simulate user:</span>
-        <select id="userSelect"></select>
-        <span class="user-dot" id="userDot" title="current user"></span>
+        <div class="sim-block">
+          <span class="sim-label">Sim user:</span>
+          <select id="userSelect"></select>
+          <span class="user-dot" id="userDot" title="current user"></span>
+        </div>
       </div>
     </div>
   </header>
@@ -200,60 +318,123 @@
         <p class="muted-small">No project description provided yet.</p>
         {% endif %}
       </div>
-      <a href="/projects/{{ entry.project.id }}/" class="pill">View project</a>
     </section>
-    <div class="grid">
-      <section class="card entry-card">
-        <div class="hd">
-          <div class="row">
-            <span class="pill">Version <span id="entryVersion2"></span></span>
-            <span class="pill">Votes <span id="entryVotes2"></span></span>
-          </div>
-          <div class="status" id="entryStatus"></div>
-        </div>
-        <div class="bd">
-          <div class="entry-scroll">
-            <div class="section-tree" id="entrySections">
-              {% include '_section_tree.html' with sections=entry_sections_tree %}
+    <div class="workspace-toolbar">
+      <div class="pane-title">Workspace</div>
+      <div class="controls pane-controls">
+        <button class="ghost" type="button" data-pane-max="doc" aria-pressed="false">Max doc</button>
+        <button class="ghost" type="button" data-pane-max="candidates" aria-pressed="false">Max candidates</button>
+        <button class="ghost" type="button" data-pane-max="editor" aria-pressed="false">Max editor</button>
+        <button class="ghost" data-pane-layout-reset>Reset layout</button>
+      </div>
+    </div>
+    <div class="workspace-shell" id="workspaceShell" aria-label="GroupMindHub workspace">
+      <div class="workspace-pane" data-pane="doc" data-pane-key="doc">
+        <section class="card entry-card">
+          <div class="hd">
+            <div>
+              <div class="pane-title">Active document</div>
+              <div class="row" style="margin-top:6px;gap:10px;flex-wrap:wrap;">
+                <span class="pill">Version <span id="entryVersion2"></span></span>
+                <span class="pill">Votes <span id="entryVotes2"></span></span>
+              </div>
+            </div>
+            <div class="pane-controls">
+              <button class="primary" id="btnAddSection" aria-label="Add section">Add section</button>
+              <button class="ghost" type="button" data-pane-max="doc" aria-label="Maximize active document" aria-pressed="false">Maximize</button>
             </div>
           </div>
-          <div class="sep"></div>
-          <h2 style="margin-top:0">Proposed changes</h2>
-          <div class="help" id="changeHelp">Loading changes…</div>
-          <div id="changeList" class="list" style="margin-top:10px"></div>
-          <div class="sep"></div>
-          <h2 style="margin-top:0">Change history</h2>
-            <div id="historyList" class="list" style="margin-top:10px"></div>
-          <div class="sep"></div>
-          <div class="history" id="historyLog">History: (empty)</div>
-        </div>
-      </section>
-      <aside class="card">
-        <div class="hd">
-          <strong>Change composer (sections)</strong>
-          <div class="row"><button class="ghost" id="btnClear">Clear</button></div>
-        </div>
-        <div class="bd">
-          <div class="stack" id="composerArea"><div class="help">Select a section in the entry to propose edits, nested subsections, or moves.</div></div>
-          <div class="stack" style="margin-top:10px">
-            <label class="label" for="changeSummary">1‑line summary</label>
-            <input id="changeSummary" placeholder="e.g., Improve wording" />
-            <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;">
+          <div class="bd">
+            <div class="entry-scroll" tabindex="0" aria-label="Active document sections">
+              <div class="section-tree" id="entrySections">
+                {% include '_section_tree.html' with sections=entry_sections_tree %}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="workspace-gutter" data-between="doc" tabindex="0" role="separator" aria-orientation="vertical" aria-label="Resize active document and candidate panes"></div>
+      <div class="workspace-pane candidate-pane" data-pane="candidates" data-pane-key="candidates">
+        <section class="card pool-card">
+          <div class="hd">
+            <div>
+              <div class="pane-title">Candidate pool</div>
+              <div class="help" id="changeHelp">Loading changes…</div>
+            </div>
+            <div class="pane-controls">
+              <button class="ghost" type="button" data-pane-max="candidates" aria-label="Maximize candidate pool" aria-pressed="false">Maximize</button>
+            </div>
+          </div>
+          <div class="bd">
+            <div class="candidate-list" id="candidatePoolList" role="list"></div>
+            <div class="empty-state" id="candidatePoolEmpty" role="note">No candidates yet. Keep current text or add a proposal.</div>
+          </div>
+        </section>
+        <section class="card queue-card">
+          <div class="hd">
+            <div class="pane-title">Waiting queue</div>
+          </div>
+          <div class="bd">
+            <div class="queue-list" id="waitingQueueList" role="list"></div>
+            <div class="empty-state" id="waitingQueueEmpty" role="note">Queue is empty for this section.</div>
+          </div>
+        </section>
+        <section class="card history-card">
+          <div class="hd">
+            <div class="pane-title">History</div>
+          </div>
+          <div class="bd">
+            <div class="list" id="historyList" role="list"></div>
+            <div class="empty-state" id="historyEmpty" role="note">No history for this section yet.</div>
+          </div>
+        </section>
+      </div>
+      <div class="workspace-gutter" data-between="editor" tabindex="0" role="separator" aria-orientation="vertical" aria-label="Resize candidate and editor panes"></div>
+      <div class="workspace-pane" data-pane="editor" data-pane-key="editor">
+        <aside class="card composer-card">
+          <div class="hd">
+            <div>
+              <div class="pane-title">Proposal editor</div>
+              <div class="live-check-chip" id="liveChecksChip" aria-live="polite">Live checks: stable</div>
+            </div>
+            <div class="pane-controls">
+              <button class="ghost" type="button" data-pane-max="editor" aria-label="Maximize proposal editor" aria-pressed="false">Maximize</button>
+            </div>
+          </div>
+          <div class="bd">
+            <div class="stack" id="composerArea"><div class="help">Select a section in the entry to propose edits, nested subsections, or moves.</div></div>
+            <div class="stack" style="margin-top:10px">
+              <label class="label" for="changeSummary">1‑line summary</label>
+              <input id="changeSummary" placeholder="e.g., Improve wording" />
               <div class="stack" style="gap:6px;min-width:0;">
                 <div class="row" style="gap:6px;flex-wrap:wrap;">
                   <span class="label">Section:</span>
                   <span id="sectionScope" class="tag section-scope">No section selected</span>
                 </div>
-                <div class="row" style="gap:6px;flex-wrap:wrap;">
+                <div class="row anchor-controls" id="anchorRow" style="gap:6px;flex-wrap:wrap;align-items:center;display:none;">
+                  <span class="label">After:</span>
+                  <span id="anchorScope" class="tag anchor-scope">Document start</span>
+                  <div class="row" style="gap:4px;">
+                    <button class="ghost" type="button" data-anchor-shift="up">Move up</button>
+                    <button class="ghost" type="button" data-anchor-shift="down">Move down</button>
+                  </div>
+                </div>
+                <div class="row" style="gap:6px;flex-wrap:wrap;align-items:flex-start;">
                   <span class="label">Affects:</span>
                   <div id="affectsTags" class="row" style="flex-wrap:wrap;gap:6px"></div>
                 </div>
               </div>
-              <button class="primary" id="btnPublish" disabled>Publish change</button>
+              <div class="composer-actions">
+                <div class="row" style="gap:8px;flex-wrap:wrap;">
+                  <button class="ghost" id="btnSaveDraft">Save draft</button>
+                  <button class="ghost" id="btnClear">Clear</button>
+                </div>
+                <button class="primary" id="btnPublish" disabled>Submit to queue</button>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </div>
     </div>
   </main>
   

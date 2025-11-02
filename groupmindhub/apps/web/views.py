@@ -3,15 +3,22 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import authenticate, login, logout
 from django.shortcuts import render, redirect, get_object_or_404
 import json
+from datetime import timedelta
 from django.utils import timezone
-from groupmindhub.apps.core.models import Project, Entry, Change, Vote, Block, Section, ProjectStar
-from groupmindhub.apps.core.api import serialize_entry
+from groupmindhub.apps.core.models import Project, Entry, Change, Vote, Block, Section, ProjectStar, EntryHistory
+from groupmindhub.apps.core.api import serialize_entry, _apply_sim_user
 from django.http import HttpResponse
 from pathlib import Path
 
 
 def index(request):
     """Home page listing projects with stars + activity; creation moved to /projects/new/."""
+    # Apply simulated user if provided so starred state reflects the active demo user
+    try:
+        from groupmindhub.apps.core.api import _apply_sim_user as _sim
+        _sim(request)
+    except Exception:
+        pass
     from django.db.models import Count
     from django.utils import timezone
     now = timezone.now()
@@ -48,6 +55,10 @@ def index(request):
 
 def project_new(request):
     """Project creation with section builder (heading + body)."""
+    try:
+        _apply_sim_user(request)
+    except Exception:
+        pass
     if request.method == 'POST':
         name = request.POST.get('name','').strip()
         desc = request.POST.get('description','').strip()
@@ -61,7 +72,9 @@ def project_new(request):
             auth_login(request, user)
         if name:
             project = Project.objects.create(name=name, description=desc)
-            entry = Entry.objects.create(project=project, title='Trunk', author=request.user, status='published')
+            # Assign author only when authenticated; otherwise leave null
+            author = request.user if request.user.is_authenticated else None
+            entry = Entry.objects.create(project=project, title='Trunk', author=author, status='published')
             # Parse sections JSON into nested tree
             try:
                 parsed = json.loads(sections_json) if sections_json else []
@@ -140,12 +153,15 @@ def project_new(request):
 
 
 from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 
+@csrf_exempt
 @require_POST
 def project_star_toggle(request, project_id: int):
     sim_user = request.POST.get('sim_user') or request.GET.get('sim_user')
-    if not request.user.is_authenticated and sim_user:
+    if sim_user:
+        # Always honor sim_user: switch session user if provided
         from django.contrib.auth import get_user_model
         from django.contrib.auth import login as auth_login
         U = get_user_model()
@@ -232,6 +248,135 @@ def entry_detail(request, entry_id: int):
     })
 
 
+def _format_time_remaining(delta):
+    if delta is None:
+        return 'decision due'
+    total_seconds = int(delta.total_seconds())
+    if total_seconds <= 0:
+        return 'decision due'
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, _seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def updates(request):
+    """Personal hub showing open votings, proposals needing attention, and followed activity."""
+    _apply_sim_user(request)
+    now = timezone.now()
+    selected_projects = request.GET.getlist('project')
+    section_query = (request.GET.get('section') or '').strip().lower()
+    selected_states = set(request.GET.getlist('state'))
+    show_open = not selected_states or 'open' in selected_states
+    show_needs = not selected_states or 'needs' in selected_states
+    show_activity = not selected_states or 'activity' in selected_states
+
+    project_choices = list(Project.objects.order_by('name').values_list('name', flat=True))
+
+    def matches_filters(project_name: str, section_label: str) -> bool:
+        if selected_projects and project_name not in selected_projects:
+            return False
+        if section_query and section_query not in (section_label or '').lower():
+            return False
+        return True
+
+    def _section_label_for_change(change: Change) -> str:
+        # Prefer resolving the target section heading text from the entry blocks
+        try:
+            section_id = change.target_section_id or ''
+            if section_id:
+                heading_id = section_id if str(section_id).startswith('h_') else f'h_{section_id}'
+                blk = Block.objects.filter(entry_id=change.target_entry_id, stable_id=heading_id).first()
+                if blk:
+                    return blk.text
+        except Exception:
+            pass
+        return change.summary or 'Section'
+
+    open_votings = []
+    if show_open:
+        for change in Change.objects.select_related('project', 'target_entry').filter(status='published').order_by('published_at')[:25]:
+            project_name = change.project.name if change.project_id else 'Project'
+            section_label = _section_label_for_change(change)
+            if not matches_filters(project_name, section_label):
+                continue
+            closes_at = change.published_at + timedelta(hours=24) if change.published_at else None
+            delta = closes_at - now if closes_at else None
+            open_votings.append({
+                'id': change.id,
+                'summary': change.summary or 'Proposal',
+                'project': project_name,
+                'section': section_label,
+                'closes_in': _format_time_remaining(delta),
+                'link': f"/entries/{change.target_entry_id}/?focus={change.target_section_id or ''}&proposal={change.id}",
+            })
+
+    your_proposals = []
+    if show_needs and (request.user.is_authenticated or request.GET.get('sim_user')):
+        personal_qs = Change.objects.select_related('project').filter(author=request.user).order_by('-published_at', '-created_at')[:25]
+        for change in personal_qs:
+            project_name = change.project.name if change.project_id else 'Project'
+            section_label = _section_label_for_change(change)
+            if not matches_filters(project_name, section_label):
+                continue
+            chips = []
+            if change.status == 'needs_update':
+                chips.append('🔄 Needs refresh')
+            if change.status == 'published':
+                chips.append('⌛ In voting')
+            if change.status == 'draft':
+                chips.append('🛌 Draft')
+            if getattr(change, 'flags', None):
+                chips.append('⚑ Flagged')
+            your_proposals.append({
+                'id': change.id,
+                'summary': change.summary or 'Proposal',
+                'project': project_name,
+                'section': section_label,
+                'chips': chips or ['⚑ Monitor'],
+                'link': f"/entries/{change.target_entry_id}/?focus={change.target_section_id or ''}&proposal={change.id}",
+            })
+
+    followed_activity = []
+    if show_activity:
+        history_qs = EntryHistory.objects.select_related('entry__project', 'change').order_by('-created_at')[:25]
+        for record in history_qs:
+            project_name = record.entry.project.name if record.entry and record.entry.project_id else 'Project'
+            change = record.change
+            if change:
+                label = f"#{change.id} merged into v{record.version_int}"
+                section_label = _section_label_for_change(change)
+                link = f"/entries/{record.entry_id}/?focus={change.target_section_id or ''}&proposal={change.id}"
+            else:
+                label = f"Entry v{record.version_int} updated"
+                section_label = record.entry.title if record.entry else 'Entry'
+                link = f"/entries/{record.entry_id}/"
+            if not matches_filters(project_name, section_label):
+                continue
+            followed_activity.append({
+                'project': project_name,
+                'section': section_label,
+                'summary': label,
+                'timestamp': record.created_at,
+                'link': link,
+            })
+
+    context = {
+        'open_votings': open_votings,
+        'your_proposals': your_proposals,
+        'followed_activity': followed_activity,
+        'project_choices': project_choices,
+        'selected_projects': selected_projects,
+        'section_query': section_query,
+        'selected_states': selected_states,
+        'show_open': show_open,
+        'show_needs': show_needs,
+        'show_activity': show_activity,
+    }
+    return render(request, 'updates.html', context)
+
+
 def change_detail(request, change_id: int):
     patch = get_object_or_404(Change, id=change_id)
     if request.method == "POST":
@@ -242,7 +387,8 @@ def change_detail(request, change_id: int):
             patch.status = "published"
             patch.published_at = timezone.now()
             from datetime import timedelta
-            patch.closes_at = patch.published_at + timedelta(hours=72)
+            # Align simple UI timer to 24h window
+            patch.closes_at = patch.published_at + timedelta(hours=24)
             patch.save()
             return redirect(request.path)
         if act == "vote":

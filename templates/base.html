@@ -14,6 +14,7 @@
       --palette-4:#fdfceb;
       --palette-5:#7ebfbd;
       --accent-rgb:133,196,192;
+      --grain-pattern:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
 
       --bg:var(--palette-4);
       --panel:var(--palette-1);
@@ -36,6 +37,7 @@
       --accent:#7ebfbd;
       --accent-strong:#9bd7d4;
       --shadow:rgba(0,0,0,0.45);
+      --grain-pattern:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.09'/%3E%3C/svg%3E");
     }
 
     *{box-sizing:border-box}
@@ -43,14 +45,28 @@
       margin:0;
       padding:0 0 48px;
       background:var(--bg);
+      background-image:var(--grain-pattern);
+      background-attachment:fixed;
+      background-size:180px 180px;
       color:var(--text);
       font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
       line-height:1.55;
     }
+    body::before{
+      content:'';
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      background-image:var(--grain-pattern);
+      background-size:180px 180px;
+      mix-blend-mode:overlay;
+      opacity:0.32;
+      z-index:-1;
+    }
     a{color:var(--accent);text-decoration:none}
     a:hover{color:var(--accent-strong)}
-    header{background:linear-gradient(135deg,rgba(var(--accent-rgb),0.85),rgba(126,191,189,0.8));border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;backdrop-filter:blur(12px)}
-    [data-theme='dark'] header{background:linear-gradient(135deg,rgba(12,32,34,0.92),rgba(18,49,52,0.92));}
+    header{background:linear-gradient(135deg,rgba(var(--accent-rgb),0.85),rgba(126,191,189,0.8));border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);background-image:var(--grain-pattern);background-blend-mode:overlay}
+    [data-theme='dark'] header{background:linear-gradient(135deg,rgba(12,32,34,0.92),rgba(18,49,52,0.92));background-image:var(--grain-pattern);background-blend-mode:overlay;}
     footer{background:rgba(var(--accent-rgb),0.15);border-top:1px solid var(--border);padding:14px 0;margin-top:48px}
     [data-theme='dark'] footer{background:rgba(12,32,34,0.8);}
     .wrap{max-width:1100px;margin:0 auto;padding:0 24px}
@@ -60,9 +76,8 @@
     .brand-logo-dark{display:none}
     [data-theme='dark'] .brand-logo-light{display:none}
     [data-theme='dark'] .brand-logo-dark{display:block}
-    .brand-link{color:var(--text);font-size:19px;font-weight:600;display:inline-flex;flex-direction:column;gap:2px}
-    .brand-sub{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.08em}
-    .site-head nav{display:flex;align-items:center;gap:16px;font-size:13px;color:var(--muted)}
+    .head-controls{display:flex;align-items:center;gap:18px}
+    .head-links{display:flex;align-items:center;gap:10px}
     .theme-toggle{display:inline-flex;align-items:center;gap:10px;background:var(--panel-soft);border:1px solid var(--border);color:var(--text);padding:6px 14px;border-radius:999px;font-size:12px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;transition:all .2s ease}
     .theme-toggle:hover{border-color:var(--accent);box-shadow:0 6px 16px rgba(var(--accent-rgb),0.18)}
     .theme-toggle .toggle-track{position:relative;width:40px;height:20px;border-radius:999px;background:rgba(var(--accent-rgb),0.3);flex-shrink:0;transition:background .2s}
@@ -73,10 +88,10 @@
     [data-theme='dark'] .theme-toggle .toggle-thumb{transform:translateX(18px);background:var(--accent-strong)}
     .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:11px;background:rgba(var(--accent-rgb),0.18);color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.35)}
     [data-theme='dark'] .pill{background:rgba(var(--accent-rgb),0.25);color:var(--text);border-color:rgba(255,255,255,0.25)}
-    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:20px;margin:20px 0;box-shadow:0 24px 48px var(--shadow)}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:20px;margin:20px 0;box-shadow:0 24px 48px var(--shadow);background-image:var(--grain-pattern);background-blend-mode:overlay}
     .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 14px;border-radius:10px;font-size:14px;font-weight:500;color:var(--text);background:var(--panel-soft);border:1px solid var(--border);transition:all .18s ease}
     .btn:hover{color:var(--accent);border-color:var(--accent)}
-    input,button,textarea,select{background:var(--panel-soft);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-family:inherit;font-size:14px}
+    input,button,textarea,select{background:var(--panel-soft);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-family:inherit;font-size:14px;background-image:var(--grain-pattern);background-blend-mode:overlay}
     input:focus,select:focus,textarea:focus{outline:2px solid rgba(var(--accent-rgb),0.45)}
     button{cursor:pointer;transition:all .18s ease}
     button.primary{background:var(--accent);color:var(--bg);border-color:transparent;font-weight:600}
@@ -88,14 +103,17 @@
     th{background:var(--panel-soft);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-size:12px}
     .muted{color:var(--muted);font-size:12px}
     .status-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;background:rgba(var(--accent-rgb),0.18);color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.35)}
-    .sim-select{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
-    .sim-select select{padding:5px 10px;font-size:13px;border-radius:8px}
-    .sim-current{color:var(--accent);font-weight:600}
+    .sim-block{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}
+    .sim-block select{padding:5px 10px;font-size:13px;border-radius:8px;background:var(--panel-soft);color:var(--text);border:1px solid var(--border)}
+    .sim-label{font-size:12px;font-weight:600}
+    .user-dot{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--panel);border:1px solid var(--border);font-size:12px;color:var(--accent)}
+    .auth-links{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+    .auth-links a{color:inherit}
     main.wrap{padding-top:48px}
     [data-theme='dark'] .status-pill{background:rgba(var(--accent-rgb),0.25);color:var(--text);border-color:rgba(255,255,255,0.25)}
   </style>
 </head>
-<body>
+<body data-sim-user="{{ request.user.username|default_if_none:''|escape }}">
   <header>
     <div class="wrap site-head">
       <div class="brand">
@@ -103,36 +121,37 @@
           <img class="brand-logo brand-logo-light" src="{% static 'img/logo-light.png' %}" alt="GroupMindHub" />
           <img class="brand-logo brand-logo-dark" src="{% static 'img/logo-dark.png' %}" alt="GroupMindHub" />
         </a>
-        <a href="/" class="brand-link">GroupMindHub<span class="brand-sub">Collaborative Law Authoring</span></a>
-        <a href="/" class="pill">Home</a>
-        <form id="simUserForm" method="post" action="/" class="sim-select">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="noop" />
-          <label>Sim user:
-            <select name="sim_user" id="simUserSelect" onchange="window.__setSimUser(this.value)">
-              <option value="">(none)</option>
-              <option value="ana">ana</option>
-              <option value="ben">ben</option>
-              <option value="chen">chen</option>
-              <option value="devi">devi</option>
-              <option value="eli">eli</option>
-              <option value="demo">demo</option>
-            </select>
-          </label>
-        </form>
       </div>
-      <nav>
+      <div class="head-controls">
+        <div class="head-links">
+          <a href="/" class="pill">Home</a>
+          <a href="/updates/" class="pill">Updates</a>
+        </div>
         <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
           <span class="toggle-label" id="themeToggleLabel">Light</span>
         </button>
-        <span id="simUserActive" class="sim-current"></span>
-        {% if user.is_authenticated %}
-          <a href="/logout/">Logout</a>
-        {% else %}
-          <a href="/login/">Login</a>
-        {% endif %}
-      </nav>
+        <div class="sim-block">
+          <span class="sim-label">Sim user:</span>
+          <select id="simUserSelect">
+            <option value="">(none)</option>
+            <option value="ana">ana</option>
+            <option value="ben">ben</option>
+            <option value="chen">chen</option>
+            <option value="devi">devi</option>
+            <option value="eli">eli</option>
+            <option value="demo">demo</option>
+          </select>
+          <span class="user-dot" id="simUserDot" title="No sim user">–</span>
+        </div>
+        <div class="auth-links">
+          {% if user.is_authenticated %}
+            <a href="/logout/">Logout</a>
+          {% else %}
+            <a href="/login/">Login</a>
+          {% endif %}
+        </div>
+      </div>
     </div>
   </header>
   <main class="wrap">
@@ -145,9 +164,46 @@
 <script>
   (function(){
     const key='gmh_sim_user';
-    window.__setSimUser=function(u){localStorage.setItem(key,u||'');document.getElementById('simUserActive').textContent=u?('Simulating: '+u):'No sim user';};
-    const cur=localStorage.getItem(key)||'';const sel=document.getElementById('simUserSelect');if(sel){sel.value=cur;}
-    window.__setSimUser(cur);
+    const body=document.body;
+    const serverUser=body?body.getAttribute('data-sim-user')||'':'';
+    const dot=document.getElementById('simUserDot');
+    const applyIndicators=(u)=>{
+      if(dot){
+        const display = u ? String(u).charAt(0).toUpperCase() : '–';
+        dot.textContent = display;
+        dot.setAttribute('title', u ? `Simulating: ${u}` : 'No sim user');
+      }
+    };
+    const setSimUser=function(u, opts){
+      try { localStorage.setItem(key, u || ''); } catch(e) {}
+      if (body) { body.setAttribute('data-sim-user', u || ''); }
+      applyIndicators(u);
+      if (opts && opts.reload) {
+        const url = new URL(window.location.href);
+        if (u) {
+          url.searchParams.set('sim_user', u);
+        } else {
+          url.searchParams.delete('sim_user');
+        }
+        window.location.href = url.toString();
+      }
+    };
+    window.__setSimUser = setSimUser;
+    let stored='';
+    try { stored = localStorage.getItem(key) || ''; } catch(e) {}
+    if (stored && stored !== serverUser) {
+      setSimUser(stored, { reload: true });
+      return;
+    }
+    const initial = serverUser || stored;
+    const sel=document.getElementById('simUserSelect');
+    if (sel) { sel.value = initial; }
+    setSimUser(initial, { reload: false });
+    if (sel) {
+      sel.addEventListener('change', (event) => {
+        setSimUser(event.target.value, { reload: true });
+      });
+    }
 
     const themeKey='gmh_theme';
     const root=document.documentElement;

@@ -1,16 +1,20 @@
 {% for node in sections %}
   <div class="section-node depth-{{ node.depth|default:1 }}" data-section-id="{{ node.id }}">
     <div class="section-header">
-      <div>
+      <div class="section-row">
         <div class="section-heading">
           <span class="section-heading-text">
             {% if node.numbering %}{{ node.numbering }} {% endif %}
             {{ node.heading|default_if_none:'(untitled section)' }}
           </span>
         </div>
+        <span class="section-status-chip" data-section-status="idle" aria-label="Section status">• Idle</span>
       </div>
       <div class="section-actions">
         <button type="button" class="section-edit" data-section-id="{{ node.id }}" onclick="try{console.log('[GMH] inline onclick fired', '{{ node.id|escapejs }}');}catch(e){}; return window.__gmhStartDraft ? window.__gmhStartDraft('{{ node.id|escapejs }}') : false;"><span>Edit</span></button>
+        {% if node.depth|default:1 == 1 %}
+        <button type="button" class="section-add" data-section-id="{{ node.id }}"><span>Add section below</span></button>
+        {% endif %}
       </div>
     </div>
     {% if node.body %}

@@ -68,6 +68,9 @@
     };
   }
 
+  const ROOT_SECTION_ID = '__root__';
+  const isVirtualSectionId = (sectionId) => sectionId === ROOT_SECTION_ID;
+
   const entryState = {
     id: parsedEntry && parsedEntry.id ? parsedEntry.id : null,
     projectId: parsedEntry && parsedEntry.project_id ? parsedEntry.project_id : null,
@@ -81,10 +84,320 @@
 
   const entryContainer = document.getElementById('entrySections');
   const composerArea = document.getElementById('composerArea');
+  const workspaceShell = document.getElementById('workspaceShell');
+  const candidateListEl = document.getElementById('candidatePoolList');
+  const candidateEmptyEl = document.getElementById('candidatePoolEmpty');
+  const queueListEl = document.getElementById('waitingQueueList');
+  const queueEmptyEl = document.getElementById('waitingQueueEmpty');
+  const changeHelpEl = document.getElementById('changeHelp');
+  const liveChecksChip = document.getElementById('liveChecksChip');
+  const paneMaxButtons = Array.from(document.querySelectorAll('[data-pane-max]'));
+  const layoutResetBtn = document.querySelector('[data-pane-layout-reset]');
+  const anchorRow = document.getElementById('anchorRow');
+  const anchorScope = document.getElementById('anchorScope');
+  const anchorUpBtn = document.querySelector('[data-anchor-shift="up"]');
+  const anchorDownBtn = document.querySelector('[data-anchor-shift="down"]');
+  const urlParams = new URLSearchParams(window.location.search || '');
+
+  const WORKSPACE_LAYOUT_KEY = 'gmh_workspace_layout_v1';
+  const WORKSPACE_FOCUS_KEY = 'gmh_workspace_focus_section';
+  const WORKSPACE_TIMER_KEY = 'gmh_workspace_timer_map';
+  const DRAFT_STORAGE_KEY = 'gmh_saved_draft';
+  const workspaceState = {
+    focusedSectionId: null,
+    paneWidths: { doc: 0.38, candidates: 0.32, editor: 0.3 },
+    maximized: '',
+    timers: new Map(),
+    pendingProposalFocus: null,
+    openDiffOnFocus: false,
+  };
+  let timerInterval = null;
+
+  function loadWorkspaceLayout() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(WORKSPACE_LAYOUT_KEY) || '{}');
+      if (stored && typeof stored === 'object') {
+        if (stored.paneWidths) {
+          const { doc, candidates, editor } = stored.paneWidths;
+          if (typeof doc === 'number' && typeof candidates === 'number' && typeof editor === 'number') {
+            workspaceState.paneWidths = { doc, candidates, editor };
+          }
+        }
+        if (typeof stored.maximized === 'string') {
+          workspaceState.maximized = stored.maximized;
+        }
+      }
+      const savedTimers = JSON.parse(localStorage.getItem(WORKSPACE_TIMER_KEY) || '{}');
+      if (savedTimers && typeof savedTimers === 'object') {
+        Object.keys(savedTimers).forEach((key) => {
+          const value = savedTimers[key];
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            workspaceState.timers.set(key, value);
+          }
+        });
+      }
+      const savedFocus = localStorage.getItem(WORKSPACE_FOCUS_KEY);
+      if (savedFocus) {
+        workspaceState.focusedSectionId = savedFocus;
+      }
+    } catch (error) {
+      console.warn('[GMH] Failed to load workspace layout', error);
+    }
+  }
+
+  function persistWorkspaceLayout() {
+    try {
+      const payload = {
+        paneWidths: workspaceState.paneWidths,
+        maximized: workspaceState.maximized || '',
+      };
+      localStorage.setItem(WORKSPACE_LAYOUT_KEY, JSON.stringify(payload));
+      const timersObj = {};
+      workspaceState.timers.forEach((value, key) => {
+        timersObj[key] = value;
+      });
+      localStorage.setItem(WORKSPACE_TIMER_KEY, JSON.stringify(timersObj));
+      if (workspaceState.focusedSectionId) {
+        localStorage.setItem(WORKSPACE_FOCUS_KEY, workspaceState.focusedSectionId);
+      }
+    } catch (error) {
+      console.warn('[GMH] Failed to persist workspace layout', error);
+    }
+  }
+
+  function applyPaneLayout() {
+    if (!workspaceShell) return;
+    const panes = workspaceShell.querySelectorAll('[data-pane]');
+    const total = workspaceState.paneWidths.doc + workspaceState.paneWidths.candidates + workspaceState.paneWidths.editor;
+    panes.forEach((pane) => {
+      const key = pane.getAttribute('data-pane-key');
+      if (!key || !workspaceState.paneWidths[key]) return;
+      const ratio = workspaceState.paneWidths[key] / (total || 1);
+      pane.style.flex = `${ratio} 1 0`;
+    });
+    if (workspaceState.maximized) {
+      workspaceShell.setAttribute('data-max', workspaceState.maximized);
+    } else {
+      workspaceShell.removeAttribute('data-max');
+    }
+    paneMaxButtons.forEach((btn) => {
+      const target = btn.getAttribute('data-pane-max');
+      const isActive = !!workspaceState.maximized && target === workspaceState.maximized;
+      if (btn.tagName === 'BUTTON') {
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      }
+      btn.classList.toggle('is-active', isActive);
+    });
+  }
+
+  function setMaximized(target) {
+    if (workspaceState.maximized === target) {
+      workspaceState.maximized = '';
+    } else {
+      workspaceState.maximized = target;
+    }
+    applyPaneLayout();
+    persistWorkspaceLayout();
+  }
+
+  function resetWorkspaceLayout() {
+    workspaceState.paneWidths = { doc: 0.38, candidates: 0.32, editor: 0.3 };
+    workspaceState.maximized = '';
+    applyPaneLayout();
+    persistWorkspaceLayout();
+  }
+
+  function saveTimerSeed(changeId) {
+    if (!workspaceState.timers.has(changeId)) {
+      // Use a 24h countdown window for proposal decisions
+      const base = Date.now() + 24 * 60 * 60 * 1000;
+      workspaceState.timers.set(changeId, base);
+    }
+  }
+
+  loadWorkspaceLayout();
+  const focusFromUrl = urlParams.get('focus');
+  if (focusFromUrl) {
+    workspaceState.focusedSectionId = focusFromUrl;
+  }
+  const proposalFromUrl = urlParams.get('proposal');
+  if (proposalFromUrl) {
+    workspaceState.pendingProposalFocus = proposalFromUrl;
+  }
+  if ((urlParams.get('view') || '') === 'diff') {
+    workspaceState.openDiffOnFocus = true;
+  }
+  applyPaneLayout();
+  attachGutterHandlers();
+  paneMaxButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-pane-max');
+      if (target === 'doc' || target === 'candidates' || target === 'editor') {
+        setMaximized(target);
+      } else {
+        setMaximized('');
+      }
+    });
+  });
+  if (layoutResetBtn) {
+    layoutResetBtn.addEventListener('click', () => {
+      resetWorkspaceLayout();
+    });
+  }
+
+  if (anchorUpBtn) {
+    anchorUpBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      shiftAnchor(-1);
+    });
+  }
+  if (anchorDownBtn) {
+    anchorDownBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      shiftAnchor(1);
+    });
+  }
 
   const sectionLookup = new Map();
   const sectionPathLookup = new Map();
   const sectionParentHeadingLookup = new Map();
+  const blockToSectionId = new Map();
+
+  function getVirtualSectionMeta() {
+    const nextNumber = String((entryState.sectionsTree ? entryState.sectionsTree.length : 0) + 1);
+    return {
+      id: ROOT_SECTION_ID,
+      heading: 'New section proposals',
+      numbering: nextNumber,
+      depth: 1,
+      virtual: true,
+    };
+  }
+
+  function registerVirtualSections() {
+    sectionLookup.set(ROOT_SECTION_ID, getVirtualSectionMeta());
+  }
+
+  function getTopLevelOrder() {
+    return (entryState.sectionsTree || []).map((section) => section.id);
+  }
+
+  function defaultAnchorSectionId() {
+    const order = getTopLevelOrder();
+    return order.length ? order[order.length - 1] : null;
+  }
+
+  function resolveHeadingBlockId(sectionId) {
+    if (!sectionId) return null;
+    const meta = sectionLookup.get(sectionId);
+    return meta ? meta.heading_block_id : null;
+  }
+
+  function computeInsertionNumber(afterSectionId) {
+    const order = getTopLevelOrder();
+    if (!order.length) return 1;
+    if (!afterSectionId) return 1;
+    const idx = order.indexOf(afterSectionId);
+    return idx >= 0 ? idx + 2 : order.length + 1;
+  }
+
+  function formatSectionLabel(sectionId) {
+    const meta = sectionLookup.get(sectionId);
+    if (!meta) return 'Section';
+    const heading = (meta.heading || '').trim() || '(untitled section)';
+    const numbering = meta.numbering ? `${meta.numbering} ` : '';
+    return `${numbering}${heading}`.trim();
+  }
+
+  function setAnchorAfterSection(sectionId, options = {}) {
+    draft.anchorAfterSectionId = sectionId || null;
+    draft.anchorAfterBlockId = resolveHeadingBlockId(sectionId);
+    if (draft.sectionId === ROOT_SECTION_ID) {
+      draft.baseNumbering = String(computeInsertionNumber(sectionId));
+    }
+    if (!options.silent) {
+      updateAnchorControls();
+      updateComposerPreview();
+    }
+  }
+
+  function updateAnchorControls() {
+    if (!anchorRow || !anchorScope) return;
+    if (!draft.active || draft.sectionId !== ROOT_SECTION_ID) {
+      anchorRow.style.display = 'none';
+      anchorScope.textContent = 'Document start';
+      clearAnchorHighlight();
+      return;
+    }
+    anchorRow.style.display = '';
+    const order = getTopLevelOrder();
+    const anchorId = draft.anchorAfterSectionId;
+    let idx = anchorId ? order.indexOf(anchorId) : -1;
+    if (idx < -1) idx = -1;
+    const label = idx >= 0 ? formatSectionLabel(anchorId) : 'Document start';
+    anchorScope.textContent = label;
+    if (anchorUpBtn) {
+      anchorUpBtn.disabled = idx < 0;
+    }
+    if (anchorDownBtn) {
+      let canDown = false;
+      if (order.length) {
+        if (idx === -1) {
+          canDown = true;
+        } else if (idx < order.length - 1) {
+          canDown = true;
+        }
+      }
+      anchorDownBtn.disabled = !canDown;
+    }
+    updateAnchorHighlight();
+  }
+
+  function updateAnchorHighlight() {
+    if (!entryContainer) return;
+    entryContainer.classList.remove('anchor-top');
+    entryContainer.querySelectorAll('.section-node-anchor').forEach((node) => node.classList.remove('section-node-anchor'));
+    if (!draft.active || draft.sectionId !== ROOT_SECTION_ID) {
+      return;
+    }
+    const anchorId = draft.anchorAfterSectionId;
+    if (!anchorId) {
+      entryContainer.classList.add('anchor-top');
+      return;
+    }
+    const node = entryContainer.querySelector(`.section-node[data-section-id="${anchorId}"]`);
+    if (node) {
+      node.classList.add('section-node-anchor');
+    }
+  }
+
+  function clearAnchorHighlight() {
+    if (!entryContainer) return;
+    entryContainer.classList.remove('anchor-top');
+    entryContainer.querySelectorAll('.section-node-anchor').forEach((node) => node.classList.remove('section-node-anchor'));
+  }
+
+  function shiftAnchor(delta) {
+    if (!draft.active || draft.sectionId !== ROOT_SECTION_ID) return;
+    const order = getTopLevelOrder();
+    if (!order.length) return;
+    let idx = draft.anchorAfterSectionId ? order.indexOf(draft.anchorAfterSectionId) : -1;
+    if (idx === -1 && delta < 0) {
+      return;
+    }
+    let nextIdx = idx + delta;
+    if (idx === -1 && delta > 0) {
+      nextIdx = 0;
+    }
+    if (nextIdx < -1) {
+      nextIdx = -1;
+    }
+    if (nextIdx >= order.length) {
+      return;
+    }
+    const nextSectionId = nextIdx >= 0 ? order[nextIdx] : null;
+    setAnchorAfterSection(nextSectionId);
+  }
   let currentHighlightId = null;
 
   window.__gmhStartDraft = function(sectionId) {
@@ -101,12 +414,35 @@
   if (entryContainer) {
     entryContainer.addEventListener('click', (event) => {
       const editBtn = event.target.closest('.section-edit');
-      if (!editBtn) return;
-      const sectionId = editBtn.getAttribute('data-section-id');
-      try { console.log('[GMH] container click; resolved sectionId =', sectionId); } catch(e) {}
-      if (!sectionId) return;
-      event.preventDefault();
-      window.__gmhStartDraft(sectionId);
+      if (editBtn) {
+        const sectionId = editBtn.getAttribute('data-section-id');
+        try { console.log('[GMH] container click; resolved sectionId =', sectionId); } catch(e) {}
+        if (!sectionId) return;
+        event.preventDefault();
+        window.__gmhStartDraft(sectionId);
+        setFocusedSection(sectionId);
+        return;
+      }
+      const addBtn = event.target.closest('.section-add');
+      if (addBtn) {
+        const sectionId = addBtn.getAttribute('data-section-id');
+        if (!sectionId) return;
+        event.preventDefault();
+        startNewSectionDraft({ afterSectionId: sectionId });
+        return;
+      }
+      const rootBtn = event.target.closest('[data-root-focus]');
+      if (rootBtn) {
+        event.preventDefault();
+        setFocusedSection(ROOT_SECTION_ID);
+        renderCandidatePane();
+        return;
+      }
+      const sectionNode = event.target.closest('.section-node');
+      if (sectionNode) {
+        const sectionId = sectionNode.getAttribute('data-section-id');
+        setFocusedSection(sectionId);
+      }
     });
   }
 
@@ -120,6 +456,12 @@
       sectionLookup.set(node.id, node);
       sectionPathLookup.set(node.id, path);
       sectionParentHeadingLookup.set(node.id, parentHeadingId);
+      if (node.heading_block_id) {
+        blockToSectionId.set(String(node.heading_block_id), node.id);
+      }
+      if (node.body_block_id) {
+        blockToSectionId.set(String(node.body_block_id), node.id);
+      }
       recomputeNumbering(node.children, numbering, depth + 1, node.id, node.heading_block_id, path);
     });
   }
@@ -136,6 +478,8 @@
     parentHeadingId: null,
     baseNumbering: '',
     baseDepth: 1,
+    anchorAfterSectionId: null,
+    anchorAfterBlockId: null,
   };
 
   window.__gmhDebug = Object.assign(window.__gmhDebug || {}, { entryState, changeState, draft });
@@ -198,6 +542,572 @@
     });
   }
 
+  function ensureFocusedSection() {
+    if (workspaceState.focusedSectionId && (sectionLookup.has(workspaceState.focusedSectionId) || isVirtualSectionId(workspaceState.focusedSectionId))) {
+      return;
+    }
+    const firstSection = entryState.sectionsTree[0];
+    workspaceState.focusedSectionId = firstSection ? firstSection.id : ROOT_SECTION_ID;
+    persistWorkspaceLayout();
+  }
+
+  function setFocusedSection(sectionId) {
+    if (!sectionId) return;
+    const virtual = isVirtualSectionId(sectionId);
+    if (!virtual && !sectionLookup.has(sectionId)) return;
+    if (workspaceState.focusedSectionId === sectionId) {
+      highlightFocusedSection();
+      renderCandidatePane();
+      return;
+    }
+    workspaceState.focusedSectionId = sectionId;
+    persistWorkspaceLayout();
+    highlightFocusedSection();
+    renderCandidatePane();
+  }
+
+  function highlightFocusedSection() {
+    if (!entryContainer) return;
+    entryContainer.querySelectorAll('.section-node-focused').forEach((node) => node.classList.remove('section-node-focused'));
+    if (!workspaceState.focusedSectionId) return;
+    if (isVirtualSectionId(workspaceState.focusedSectionId)) return;
+    const target = entryContainer.querySelector(`.section-node[data-section-id="${workspaceState.focusedSectionId}"]`);
+    if (target) {
+      target.classList.add('section-node-focused');
+      target.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function updateSectionStatusChips() {
+    document.querySelectorAll('.section-node .section-status-chip').forEach((chip) => {
+      const node = chip.closest('.section-node');
+      if (!node) return;
+      const sectionId = node.getAttribute('data-section-id');
+      const bucket = changeState.buckets ? changeState.buckets.get(sectionId) : null;
+      const isVoting = bucket && Array.isArray(bucket.pool) && bucket.pool.length > 0;
+      const rootAnchorList = changeState.rootAnchors ? changeState.rootAnchors.get(sectionId) : null;
+      if (isVoting) {
+        chip.textContent = '🗳 Voting';
+        chip.dataset.sectionStatus = 'voting';
+        chip.setAttribute('aria-label', 'Section status: voting');
+      } else if (rootAnchorList && rootAnchorList.length) {
+        const countLabel = rootAnchorList.length === 1 ? '1 new section waiting below' : `${rootAnchorList.length} new sections waiting below`;
+        chip.textContent = `🆕 ${countLabel}`;
+        chip.dataset.sectionStatus = 'voting';
+        chip.setAttribute('aria-label', 'Section status: new top-level section voting');
+      } else {
+        chip.textContent = '• Idle';
+        chip.dataset.sectionStatus = 'idle';
+        chip.setAttribute('aria-label', 'Section status: idle');
+      }
+    });
+  }
+
+  function resolveRootAnchor(change) {
+    const anchors = Array.isArray(change && change.anchors) ? change.anchors : [];
+    for (let i = 0; i < anchors.length; i += 1) {
+      const raw = anchors[i];
+      if (typeof raw !== 'string') continue;
+      const parts = raw.split(':');
+      if (parts.length < 2) continue;
+      const ref = parts[1];
+      if (!ref) continue;
+      const candidates = new Set();
+      candidates.add(ref);
+      if (!ref.startsWith('h_') && !ref.startsWith('p_')) {
+        candidates.add(`h_${ref}`);
+        candidates.add(`p_${ref}`);
+      }
+      const trimmed = ref.replace(/^h_/, '').replace(/^p_/, '');
+      candidates.add(`h_${trimmed}`);
+      candidates.add(`p_${trimmed}`);
+      for (const candidate of candidates) {
+        if (blockToSectionId.has(candidate)) {
+          return {
+            sectionId: blockToSectionId.get(candidate),
+            position: parts[0] || 'after',
+          };
+        }
+      }
+    }
+    return { sectionId: null, position: 'start' };
+  }
+
+  function buildRootProposalNode(title, changes, extraClass) {
+    const node = document.createElement('div');
+    node.className = `section-node root-proposal depth-1${extraClass ? ` ${extraClass}` : ''}`;
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    const row = document.createElement('div');
+    row.className = 'section-row';
+    const heading = document.createElement('div');
+    heading.className = 'section-heading';
+    const headingSpan = document.createElement('span');
+    headingSpan.className = 'section-heading-text';
+    headingSpan.textContent = title;
+    heading.appendChild(headingSpan);
+    row.appendChild(heading);
+    const chip = document.createElement('span');
+    chip.className = 'section-status-chip';
+    chip.dataset.sectionStatus = 'voting';
+    chip.textContent = '🆕 Voting';
+    chip.setAttribute('aria-label', 'Section status: new top-level section voting');
+    row.appendChild(chip);
+    header.appendChild(row);
+    node.appendChild(header);
+    const list = document.createElement('ul');
+    list.className = 'root-proposal-list';
+    const display = changes.slice(0, 3);
+    display.forEach((change) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<strong>${escapeHtml(change.summary || 'New section proposal')}</strong>`;
+      list.appendChild(li);
+    });
+    if (changes.length > 3) {
+      const remainder = document.createElement('li');
+      remainder.textContent = `+${changes.length - 3} more proposals`;
+      list.appendChild(remainder);
+    }
+    node.appendChild(list);
+    const actions = document.createElement('div');
+    actions.className = 'root-proposal-actions';
+    const focusBtn = document.createElement('button');
+    focusBtn.type = 'button';
+    focusBtn.className = 'ghost';
+    focusBtn.setAttribute('data-root-focus', 'true');
+    focusBtn.textContent = 'Review proposals';
+    actions.appendChild(focusBtn);
+    node.appendChild(actions);
+    return node;
+  }
+
+  function updateRootStartIndicator() {
+    if (!entryContainer) return;
+    entryContainer.querySelectorAll('.root-proposal-banner').forEach((el) => el.remove());
+    const startProposals = changeState.rootStartProposals || [];
+    if (!startProposals.length) return;
+    const banner = buildRootProposalNode('New section proposals at document start', startProposals, 'root-proposal-banner');
+    entryContainer.insertBefore(banner, entryContainer.firstChild || null);
+  }
+
+  function updateRootAnchorIndicators() {
+    if (!entryContainer) return;
+    entryContainer.querySelectorAll('.root-proposal-inline').forEach((el) => el.remove());
+    if (!changeState.rootAnchors) return;
+    changeState.rootAnchors.forEach((list, sectionId) => {
+      if (!Array.isArray(list) || !list.length) return;
+      const target = entryContainer.querySelector(`.section-node[data-section-id="${sectionId}"]`);
+      if (!target) return;
+      const label = `New section proposals after ${formatSectionLabel(sectionId)}`;
+      const node = buildRootProposalNode(label, list, 'root-proposal-inline');
+      node.classList.add(`depth-${Math.max(1, (sectionLookup.get(sectionId) || {}).depth || 1)}`);
+      target.insertAdjacentElement('afterend', node);
+    });
+  }
+
+  function refreshRootIndicators() {
+    updateRootStartIndicator();
+    updateRootAnchorIndicators();
+  }
+
+  const MAX_POOL_ITEMS = 3;
+
+  function prepareChangeBuckets() {
+    const buckets = new Map();
+    const history = [];
+    const rootAnchors = new Map();
+    const rootStartProposals = [];
+    (changeState.list || []).forEach((change) => {
+      if (!change || typeof change !== 'object') return;
+      if (change.status === 'merged') {
+        history.push(change);
+        return;
+      }
+      const targetSectionId = change.target_section_id || (change.target_section_block_id ? String(change.target_section_block_id).replace(/^h_/, '') : null);
+      if (!targetSectionId) return;
+      if (!buckets.has(targetSectionId)) {
+        buckets.set(targetSectionId, { pool: [], queue: [] });
+      }
+      const bucket = buckets.get(targetSectionId);
+      if (change.status === 'needs_update' || change.status === 'draft') {
+        bucket.queue.push(change);
+      } else {
+        const targetList = bucket.pool.length < MAX_POOL_ITEMS ? bucket.pool : bucket.queue;
+        targetList.push(change);
+      }
+      if (targetSectionId === ROOT_SECTION_ID) {
+        const anchorMeta = resolveRootAnchor(change);
+        if (anchorMeta.sectionId) {
+          const key = anchorMeta.sectionId;
+          if (!rootAnchors.has(key)) {
+            rootAnchors.set(key, []);
+          }
+          rootAnchors.get(key).push(change);
+        } else {
+          rootStartProposals.push(change);
+        }
+      }
+      saveTimerSeed(String(change.id));
+    });
+    changeState.buckets = buckets;
+    changeState.history = history;
+    changeState.rootAnchors = rootAnchors;
+    changeState.rootStartProposals = rootStartProposals;
+  }
+
+  function buildKeepCard(sectionId) {
+    if (isVirtualSectionId(sectionId) || !sectionLookup.has(sectionId) || sectionLookup.get(sectionId)?.virtual) {
+      return null;
+    }
+    const card = document.createElement('div');
+    card.className = 'candidate-card';
+    card.setAttribute('role', 'listitem');
+    card.innerHTML = `
+      <div class="candidate-head">
+        <div>
+          <div class="candidate-title">Keep as-is</div>
+          <div class="candidate-meta">Current document · Section ${escapeHtml(sectionLookup.get(sectionId)?.numbering || '')}</div>
+        </div>
+        <div class="candidate-score">Support <strong>100%</strong></div>
+      </div>
+      <div class="candidate-actions" style="justify-content:flex-end;">
+        <button class="ghost" data-action="diff-keep">View context</button>
+      </div>
+    `;
+    card.querySelector('[data-action="diff-keep"]').addEventListener('click', () => {
+      alert('Keep-as-is uses the current published section. Detailed diff coming soon.');
+    });
+    return card;
+  }
+
+  function formatTimer(delta) {
+    if (delta <= 0) return 'decision due';
+    const seconds = Math.floor(delta / 1000);
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) {
+      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  function buildDiffPanel(change) {
+    const beforeLines = extractDiffLines(change.before_outline, 'before');
+    const afterLines = extractDiffLines(change.after_outline, 'after');
+    if (!beforeLines.length && !afterLines.length) return '';
+    return `<div class="diff-grid" data-diff-body hidden>${renderDiffBlock(beforeLines, 'Before')} ${renderDiffBlock(afterLines, 'After')}</div>`;
+  }
+
+  function buildCandidateCard(change, placement) {
+    const yes = change.yes || 0;
+    const no = change.no || 0;
+    const score = yes - no;
+    const requiredYes = change.required_yes_votes || 0;
+    const totalVotes = yes + no;
+    const approvalPct = totalVotes ? Math.round((yes / totalVotes) * 100) : 0;
+    const timerId = `change-${change.id}`;
+    const expiresAt = workspaceState.timers.get(String(change.id));
+    const timeLeft = expiresAt ? expiresAt - Date.now() : 0;
+    const diffMarkup = buildDiffPanel(change);
+    const card = document.createElement('div');
+    card.className = 'candidate-card';
+    card.setAttribute('role', 'listitem');
+    card.innerHTML = `
+      <div class="candidate-head">
+        <div>
+          <div class="candidate-title">${escapeHtml(change.summary || 'Proposal')}</div>
+          <div class="candidate-meta">#${change.id} · ${escapeHtml(change.author_name || 'Anonymous')} · base v${change.base_entry_version_int || entryState.version}</div>
+          <div class="candidate-badges">${change.bundle ? '<span class="badge">Bundle</span>' : ''}</div>
+        </div>
+        <div class="candidate-score">
+          <span class="candidate-timer" data-countdown-id="${timerId}">${formatTimer(timeLeft)}</span>
+          <span>${yes}/${requiredYes || '—'} needed</span>
+          <span>Score ${score >= 0 ? '+' : ''}${score}</span>
+        </div>
+      </div>
+      <div class="candidate-actions">
+        <button data-act="vote-up" data-id="${change.id}">Upvote</button>
+        <button data-act="vote-down" data-id="${change.id}">Downvote</button>
+        <button data-act="diff" data-id="${change.id}">Diff</button>
+        <button data-act="max" data-id="${change.id}">Maximize</button>
+        <span class="mini muted">${approvalPct}% support</span>
+      </div>
+      ${diffMarkup}
+    `;
+
+    card.querySelector('[data-act="vote-up"]').addEventListener('click', () => vote(change, 1));
+    card.querySelector('[data-act="vote-down"]').addEventListener('click', () => vote(change, -1));
+    const diffButton = card.querySelector('[data-act="diff"]');
+    if (diffButton) {
+      diffButton.addEventListener('click', () => {
+        const panel = card.querySelector('[data-diff-body]');
+        if (!panel) return;
+        const hidden = panel.hasAttribute('hidden');
+        if (hidden) {
+          panel.removeAttribute('hidden');
+        } else {
+          panel.setAttribute('hidden', 'hidden');
+        }
+      });
+    }
+    const maxButton = card.querySelector('[data-act="max"]');
+    if (maxButton) {
+      maxButton.addEventListener('click', () => setMaximized('candidates'));
+    }
+    card.dataset.placement = placement;
+    return card;
+  }
+
+  function buildQueueItem(change, index) {
+    const card = document.createElement('div');
+    card.className = 'queue-item';
+    card.setAttribute('role', 'listitem');
+    const flags = Array.isArray(change.flags) ? change.flags : [];
+    const flagMarkup = flags.length ? flags.map((flag) => `<span class="badge">⚑ ${escapeHtml(flag)}</span>`).join('') : '';
+    const autoRemove = change.auto_remove_threshold ? `<span class="mini muted">Will auto-remove at −${escapeHtml(String(change.auto_remove_threshold))}</span>` : '';
+    card.innerHTML = `
+      <div class="queue-top">
+        <div>
+          <div class="candidate-title">${escapeHtml(change.summary || 'Proposal')}</div>
+          <div class="candidate-meta">#${change.id} · ${escapeHtml(change.author_name || 'Anonymous')}</div>
+        </div>
+        <div class="queue-pos">#${index + 1}</div>
+      </div>
+      <div class="queue-flags">${flagMarkup || '<span class="mini muted">No flags</span>'}</div>
+      <div class="candidate-actions" style="justify-content:space-between;">
+        <div class="stack" style="gap:4px;">
+          <span class="mini muted">Downvotes: ${change.downvotes || change.no || 0}</span>
+          ${autoRemove}
+        </div>
+        <div class="row" style="gap:8px;">
+          <button data-act="queue-down" data-id="${change.id}">Downvote</button>
+        </div>
+      </div>
+    `;
+    card.querySelector('[data-act="queue-down"]').addEventListener('click', () => vote(change, -1));
+    return card;
+  }
+
+  function renderCandidatePane() {
+    if (!candidateListEl || !queueListEl) return;
+    const sectionId = workspaceState.focusedSectionId;
+    if (!sectionId) {
+      candidateListEl.innerHTML = '';
+      queueListEl.innerHTML = '';
+      if (candidateEmptyEl) candidateEmptyEl.textContent = 'Select a section to view candidate pool.';
+      if (queueEmptyEl) queueEmptyEl.textContent = 'Select a section to view the queue.';
+      renderHistoryPane(null);
+      return;
+    }
+    const virtualSection = isVirtualSectionId(sectionId);
+    candidateListEl.innerHTML = '';
+    queueListEl.innerHTML = '';
+    const bucket = changeState.buckets ? changeState.buckets.get(sectionId) : null;
+    if (bucket && Array.isArray(bucket.queue) && bucket.queue.length && !Array.isArray(bucket.pool)) {
+      bucket.pool = [];
+    }
+    const keepCard = buildKeepCard(sectionId);
+    if (keepCard) {
+      candidateListEl.appendChild(keepCard);
+    }
+    const hasPool = bucket && bucket.pool.length;
+    if (hasPool) {
+      bucket.pool.forEach((change) => {
+        const card = buildCandidateCard(change, 'pool');
+        if (workspaceState.pendingProposalFocus && String(change.id) === String(workspaceState.pendingProposalFocus)) {
+          card.classList.add('candidate-card-focus');
+          setTimeout(() => {
+            card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }, 100);
+          workspaceState.pendingProposalFocus = null;
+          if (workspaceState.openDiffOnFocus) {
+            const diffPanel = card.querySelector('[data-diff-body]');
+            if (diffPanel) {
+              diffPanel.removeAttribute('hidden');
+            }
+            workspaceState.openDiffOnFocus = false;
+          }
+        }
+        candidateListEl.appendChild(card);
+      });
+    }
+    if (candidateEmptyEl) {
+      candidateEmptyEl.textContent = virtualSection
+        ? 'No new section proposals yet.'
+        : 'No candidates yet. Keep current text or add a proposal.';
+      candidateEmptyEl.style.display = hasPool ? 'none' : '';
+    }
+    const hasQueue = bucket && bucket.queue.length;
+    if (hasQueue) {
+      bucket.queue.forEach((change, idx) => {
+        const item = buildQueueItem(change, idx);
+        if (workspaceState.pendingProposalFocus && String(change.id) === String(workspaceState.pendingProposalFocus)) {
+          item.classList.add('candidate-card-focus');
+          setTimeout(() => {
+            item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }, 100);
+          workspaceState.pendingProposalFocus = null;
+          workspaceState.openDiffOnFocus = false;
+        }
+        queueListEl.appendChild(item);
+      });
+    }
+    if (queueEmptyEl) {
+      queueEmptyEl.textContent = virtualSection
+        ? 'Queue is empty for new section proposals.'
+        : 'Queue is empty for this section.';
+      queueEmptyEl.style.display = hasQueue ? 'none' : '';
+    }
+    if (changeHelpEl) {
+      if (virtualSection) {
+        changeHelpEl.textContent = hasPool ? 'Review and vote on proposed top-level sections.' : 'Propose a new section to kick things off.';
+      } else {
+        changeHelpEl.textContent = hasPool ? '' : 'No candidates yet.';
+      }
+    }
+    ensureTimerLoop();
+    renderHistoryPane(sectionId);
+  }
+
+  function renderHistoryPane(sectionId) {
+    const list = document.getElementById('historyList');
+    const empty = document.getElementById('historyEmpty');
+    if (!list || !empty) return;
+    list.innerHTML = '';
+    let items = [];
+    if (sectionId && changeState.history && Array.isArray(changeState.history)) {
+      items = changeState.history.filter((chg) => {
+        const id = chg.target_section_id || (chg.target_section_block_id ? String(chg.target_section_block_id).replace(/^h_/, '') : null);
+        return id === sectionId;
+      });
+    }
+    if (!items.length) {
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    items.slice(0, 10).forEach((chg) => {
+      const row = document.createElement('div');
+      row.className = 'update-card';
+      row.setAttribute('role', 'listitem');
+      row.innerHTML = `
+        <h3>${escapeHtml(chg.summary || 'Change')}</h3>
+        <div class="update-meta"><span>#${chg.id}</span><span>Merged</span></div>
+        <div class="update-actions"><a href="/entries/${entryState.id}/?focus=${encodeURIComponent(sectionId||'')}&proposal=${chg.id}">Open</a></div>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  function ensureTimerLoop() {
+    if (timerInterval) return;
+    timerInterval = window.setInterval(updateCountdownDisplays, 1000);
+  }
+
+  function updateCountdownDisplays() {
+    const now = Date.now();
+    document.querySelectorAll('[data-countdown-id]').forEach((node) => {
+      const id = node.getAttribute('data-countdown-id');
+      if (!id) return;
+      const changeId = id.replace('change-', '');
+      const expires = workspaceState.timers.get(changeId);
+      if (!expires) return;
+      const delta = expires - now;
+      node.textContent = formatTimer(delta);
+    });
+  }
+
+  function findAdjacentPanes(gutter) {
+    if (!gutter) return null;
+    let prev = gutter.previousElementSibling;
+    while (prev && !prev.hasAttribute('data-pane')) {
+      prev = prev.previousElementSibling;
+    }
+    let next = gutter.nextElementSibling;
+    while (next && !next.hasAttribute('data-pane')) {
+      next = next.nextElementSibling;
+    }
+    if (!prev || !next) return null;
+    return { prev, next, prevKey: prev.getAttribute('data-pane-key'), nextKey: next.getAttribute('data-pane-key') };
+  }
+
+  function attachGutterHandlers() {
+    if (!workspaceShell) return;
+    const gutters = workspaceShell.querySelectorAll('.workspace-gutter');
+    gutters.forEach((gutter) => {
+      const adjacent = findAdjacentPanes(gutter);
+      if (!adjacent || !adjacent.prevKey || !adjacent.nextKey) return;
+      const onPointerDown = (event) => {
+        if (event.type === 'mousedown' && event.button !== 0) return;
+        event.preventDefault();
+        workspaceState.maximized = '';
+        applyPaneLayout();
+        const initial = {};
+        const panes = workspaceShell.querySelectorAll('[data-pane]');
+        let shellWidth = 0;
+        panes.forEach((pane) => {
+          const rect = pane.getBoundingClientRect();
+          shellWidth += rect.width;
+          initial[pane.getAttribute('data-pane-key')] = rect.width;
+        });
+        const minWidthPx = 220;
+        const pairTotal = initial[adjacent.prevKey] + initial[adjacent.nextKey];
+        const startX = event.touches ? event.touches[0].clientX : event.clientX;
+
+        const onMove = (moveEvent) => {
+          const clientX = moveEvent.touches ? moveEvent.touches[0].clientX : moveEvent.clientX;
+          const delta = clientX - startX;
+          let newPrevPx = initial[adjacent.prevKey] + delta;
+          newPrevPx = Math.max(minWidthPx, Math.min(pairTotal - minWidthPx, newPrevPx));
+          const newNextPx = pairTotal - newPrevPx;
+          workspaceState.paneWidths[adjacent.prevKey] = newPrevPx / shellWidth;
+          workspaceState.paneWidths[adjacent.nextKey] = newNextPx / shellWidth;
+          panes.forEach((pane) => {
+            const key = pane.getAttribute('data-pane-key');
+            if (key !== adjacent.prevKey && key !== adjacent.nextKey) {
+              workspaceState.paneWidths[key] = initial[key] / shellWidth;
+            }
+          });
+          applyPaneLayout();
+        };
+
+        const onUp = () => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('touchmove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          document.removeEventListener('touchend', onUp);
+          gutter.dataset.active = 'false';
+          persistWorkspaceLayout();
+        };
+
+        gutter.dataset.active = 'true';
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchend', onUp);
+      };
+
+      gutter.addEventListener('mousedown', onPointerDown);
+      gutter.addEventListener('touchstart', onPointerDown, { passive: false });
+      gutter.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const deltaRatio = event.key === 'ArrowLeft' ? -0.02 : 0.02;
+        workspaceState.maximized = '';
+        const changeRatio = deltaRatio;
+        workspaceState.paneWidths[adjacent.prevKey] = Math.max(0.15, workspaceState.paneWidths[adjacent.prevKey] + changeRatio);
+        workspaceState.paneWidths[adjacent.nextKey] = Math.max(0.15, workspaceState.paneWidths[adjacent.nextKey] - changeRatio);
+        const total = workspaceState.paneWidths.doc + workspaceState.paneWidths.candidates + workspaceState.paneWidths.editor;
+        workspaceState.paneWidths.doc /= total;
+        workspaceState.paneWidths.candidates /= total;
+        workspaceState.paneWidths.editor /= total;
+        applyPaneLayout();
+        persistWorkspaceLayout();
+      });
+    });
+  }
+
   function makeNewSection() {
     const id = `ns_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36)}`;
     return {
@@ -210,6 +1120,22 @@
       parent_section_id: null,
       numbering: '',
       depth: draft.baseDepth,
+      isNew: true,
+    };
+  }
+
+  function makeTopLevelSectionTemplate(insertionNumber) {
+    const id = `ns_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36)}`;
+    return {
+      id,
+      heading: '',
+      heading_block_id: `h_${id}`,
+      body: '',
+      body_block_id: `p_${id}`,
+      children: [],
+      parent_section_id: null,
+      numbering: String(insertionNumber || (entryState.sectionsTree ? entryState.sectionsTree.length + 1 : 1)),
+      depth: 1,
       isNew: true,
     };
   }
@@ -233,6 +1159,12 @@
     if (node) {
       node.classList.add('section-node-active');
       currentHighlightId = sectionId;
+      if (workspaceState.focusedSectionId !== sectionId) {
+        workspaceState.focusedSectionId = sectionId;
+        highlightFocusedSection();
+        renderCandidatePane();
+        persistWorkspaceLayout();
+      }
     }
   }
 
@@ -240,13 +1172,15 @@
     sectionLookup.clear();
     sectionPathLookup.clear();
     sectionParentHeadingLookup.clear();
+    blockToSectionId.clear();
     recomputeNumbering(entryState.sectionsTree);
+    registerVirtualSections();
     const container = document.getElementById('entrySections');
     container.innerHTML = '';
     const fragment = document.createDocumentFragment();
     const activeId = draft.active ? draft.sectionId : null;
     if (!entryState.sectionsTree.length) {
-      fragment.appendChild(helpMessage('This entry has no sections yet.'));
+      fragment.appendChild(helpMessage('This entry has no sections yet. Use "Add section" to propose the first one.'));
     } else {
       const renderNodes = (nodes) => {
         nodes.forEach((section) => {
@@ -260,12 +1194,22 @@
           const header = document.createElement('div');
           header.className = 'section-header';
 
-      const headerInfo = document.createElement('div');
-      const heading = document.createElement('div');
-      heading.className = 'section-heading';
-      const numberingPrefix = section.numbering ? `${section.numbering} ` : '';
-      heading.textContent = `${numberingPrefix}${section.heading || '(untitled section)'}`;
-      headerInfo.appendChild(heading);
+          const headerRow = document.createElement('div');
+          headerRow.className = 'section-row';
+          const heading = document.createElement('div');
+          heading.className = 'section-heading';
+          const numberingPrefix = section.numbering ? `${section.numbering} ` : '';
+          const headingSpan = document.createElement('span');
+          headingSpan.className = 'section-heading-text';
+          headingSpan.textContent = `${numberingPrefix}${section.heading || '(untitled section)'}`;
+          heading.appendChild(headingSpan);
+          headerRow.appendChild(heading);
+          const statusChip = document.createElement('span');
+          statusChip.className = 'section-status-chip';
+          statusChip.dataset.sectionStatus = 'idle';
+          statusChip.textContent = '• Idle';
+          statusChip.setAttribute('aria-label', 'Section status: idle');
+          headerRow.appendChild(statusChip);
 
           const actions = document.createElement('div');
           actions.className = 'section-actions';
@@ -280,8 +1224,16 @@
             window.__gmhStartDraft && window.__gmhStartDraft(section.id);
           });
           actions.appendChild(editBtn);
+          if ((section.depth || 1) === 1) {
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'section-add';
+            addBtn.dataset.sectionId = section.id;
+            addBtn.innerHTML = '<span>Add section below</span>';
+            actions.appendChild(addBtn);
+          }
 
-          header.appendChild(headerInfo);
+          header.appendChild(headerRow);
           header.appendChild(actions);
           nodeEl.appendChild(header);
 
@@ -301,6 +1253,11 @@
       renderNodes(entryState.sectionsTree);
     }
     container.appendChild(fragment);
+    ensureFocusedSection();
+    highlightFocusedSection();
+    updateSectionStatusChips();
+    refreshRootIndicators();
+    renderCandidatePane();
     const titleEl = document.getElementById('entryTitle');
     if (titleEl) {
       const titleText = entryState.title && entryState.title.trim() ? entryState.title : 'Untitled entry';
@@ -314,6 +1271,8 @@
       const el = document.getElementById(id);
       if (el) el.textContent = entryState.votes;
     });
+    updateAnchorControls();
+    updateAnchorHighlight();
   }
 
   function startDraft(sectionId) {
@@ -323,6 +1282,9 @@
       alert('Section not found.');
       return;
     }
+    draft.anchorAfterSectionId = null;
+    draft.anchorAfterBlockId = null;
+    updateAnchorControls();
     const path = sectionPathLookup.get(sectionId) || [];
     try { console.log('[GMH] Using path', path); } catch(e) {}
     const context = getContextForPath(entryState.sectionsTree, path);
@@ -353,6 +1315,34 @@
     try { console.log('[GMH] draft initialized', { id: draft.sectionId, base: draft.baseNumbering, depth: draft.baseDepth, childCount: (draft.workingNodes[0] && draft.workingNodes[0].children || []).length}); } catch(e) {}
   }
 
+  function startNewSectionDraft(options = {}) {
+    try { console.log('[GMH] startNewSectionDraft invoked', options); } catch (e) {}
+    clearHighlight();
+    clearAnchorHighlight();
+    const afterSectionId = Object.prototype.hasOwnProperty.call(options, 'afterSectionId')
+      ? options.afterSectionId
+      : defaultAnchorSectionId();
+    const insertionNumber = computeInsertionNumber(afterSectionId);
+    const template = makeTopLevelSectionTemplate(insertionNumber);
+    draft.active = true;
+    draft.sectionId = ROOT_SECTION_ID;
+    draft.originalNodes = [];
+    draft.workingNodes = [template];
+    draft.parentHeadingId = null;
+    draft.baseNumbering = template.numbering;
+    draft.baseDepth = 1;
+    setAnchorAfterSection(afterSectionId, { silent: true });
+    setFocusedSection(ROOT_SECTION_ID);
+    renderComposer();
+    const summaryInput = document.getElementById('changeSummary');
+    if (summaryInput && !summaryInput.value.trim()) {
+      summaryInput.value = `Add section ${template.numbering}`;
+    }
+    updateAnchorControls();
+    updateAnchorHighlight();
+    updateComposerPreview();
+  }
+
   function clearDraft() {
     draft.active = false;
     draft.sectionId = null;
@@ -361,9 +1351,46 @@
     draft.parentHeadingId = null;
     draft.baseNumbering = '';
     draft.baseDepth = 1;
+    draft.anchorAfterSectionId = null;
+    draft.anchorAfterBlockId = null;
     document.getElementById('changeSummary').value = '';
     clearHighlight();
     renderComposer();
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (error) { console.warn('[GMH] Failed to clear saved draft', error); }
+    if (liveChecksChip) {
+      liveChecksChip.textContent = 'Live checks: stable';
+    }
+    clearAnchorHighlight();
+    updateAnchorControls();
+  }
+
+  function saveDraftSnapshot() {
+    if (!draft.active || !draft.workingNodes.length) {
+      if (liveChecksChip) {
+        liveChecksChip.textContent = 'Live checks: select a section first';
+      }
+      return;
+    }
+    const summaryInput = document.getElementById('changeSummary');
+    const payload = {
+      sectionId: draft.sectionId,
+      summary: summaryInput ? summaryInput.value : '',
+      workingNodes: deepClone(draft.workingNodes),
+      timestamp: Date.now(),
+    };
+    try {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
+      if (liveChecksChip) {
+        liveChecksChip.textContent = 'Live checks: draft saved';
+        window.setTimeout(() => {
+          if (liveChecksChip.textContent === 'Live checks: draft saved') {
+            liveChecksChip.textContent = 'Live checks: stable';
+          }
+        }, 3000);
+      }
+    } catch (error) {
+      console.warn('[GMH] Failed to persist draft', error);
+    }
   }
 
   function renderComposerTree(list, pathPrefix, container) {
@@ -423,11 +1450,10 @@
       addChildBtn.type = 'button'; addChildBtn.dataset.act = 'add-child'; addChildBtn.textContent = 'Add subsection';
       controls.appendChild(addChildBtn);
 
-      if (path.length > 1) {
-        const addSiblingBtn = document.createElement('button');
-        addSiblingBtn.type = 'button'; addSiblingBtn.dataset.act = 'add-sibling'; addSiblingBtn.textContent = 'Add sibling';
-        controls.appendChild(addSiblingBtn);
-      }
+      // Allow adding a sibling even at top-level
+      const addSiblingBtn = document.createElement('button');
+      addSiblingBtn.type = 'button'; addSiblingBtn.dataset.act = 'add-sibling'; addSiblingBtn.textContent = 'Add sibling';
+      controls.appendChild(addSiblingBtn);
 
       const moveUpBtn = document.createElement('button');
       moveUpBtn.type = 'button'; moveUpBtn.dataset.act = 'move-up'; moveUpBtn.textContent = 'Move up';
@@ -520,6 +1546,14 @@
   }
 
   function addSiblingSection(path) {
+    // Support both nested and top-level sibling insertion
+    if (path.length <= 1) {
+      const index = path[0] || 0;
+      const newNode = makeNewSection();
+      newNode.parent_section_id = null;
+      draft.workingNodes.splice(index + 1, 0, newNode);
+      return;
+    }
     const parentCtx = getParentContext(draft.workingNodes, path);
     if (!parentCtx) return;
     const siblings = parentCtx.node.children;
@@ -612,8 +1646,19 @@
 
   function computeOps(originalRoot, updatedRoot, context) {
     const parentHeadingId = context.parentHeadingId || null;
-    const originalBlocks = originalRoot ? flattenBlocks(cloneSection(originalRoot), parentHeadingId) : [];
-    const finalBlocks = updatedRoot ? flattenBlocks(cloneSection(updatedRoot), parentHeadingId) : [];
+    const anchorAfterId = context.anchorAfterId || null;
+    let anchorUsed = false;
+    function flattenAny(node) {
+      if (!node) return [];
+      if (node.__list && Array.isArray(node.children)) {
+        let acc = [];
+        node.children.forEach((child) => { acc = acc.concat(flattenBlocks(cloneSection(child), parentHeadingId)); });
+        return acc;
+      }
+      return flattenBlocks(cloneSection(node), parentHeadingId);
+    }
+    const originalBlocks = flattenAny(originalRoot);
+    const finalBlocks = flattenAny(updatedRoot);
     const originalBlockIds = new Set(originalBlocks.map((b) => b.blockId));
     const finalBlockIds = new Set(finalBlocks.map((b) => b.blockId));
     const deletedIds = new Set([...originalBlockIds].filter((id) => !finalBlockIds.has(id)));
@@ -650,10 +1695,15 @@
 
     finalBlocks.forEach((block, idx) => {
       const afterId = findPrevSeen(finalBlocks, idx);
+      let effectiveAfterId = afterId;
+      if (insertedIds.has(block.blockId) && !effectiveAfterId && anchorAfterId && block.isHeading && !anchorUsed) {
+        effectiveAfterId = anchorAfterId;
+        anchorUsed = true;
+      }
       if (insertedIds.has(block.blockId)) {
         ops.push({
           type: 'INSERT_BLOCK',
-          after_id: afterId,
+          after_id: effectiveAfterId,
           new_block: {
             id: block.blockId,
             type: block.type,
@@ -661,7 +1711,7 @@
             parent: block.parent || null,
           },
         });
-        if (afterId) anchors.add(`after:${afterId}`);
+        if (effectiveAfterId) anchors.add(`after:${effectiveAfterId}`);
         affected.add(block.blockId);
       } else {
         const original = originalMap.get(block.blockId);
@@ -673,10 +1723,10 @@
           ops.push({
             type: 'MOVE_BLOCK',
             block_id: block.blockId,
-            after_id: afterId,
+            after_id: effectiveAfterId,
             new_parent: block.parent || null,
           });
-          if (afterId) anchors.add(`after:${afterId}`);
+          if (effectiveAfterId) anchors.add(`after:${effectiveAfterId}`);
           affected.add(block.blockId);
         }
       }
@@ -684,9 +1734,17 @@
     });
 
     const originalSections = new Map();
-    collectSections(originalRoot, originalSections);
     const updatedSections = new Map();
-    collectSections(updatedRoot, updatedSections);
+    function collectAny(node, map) {
+      if (!node) return;
+      if (node.__list && Array.isArray(node.children)) {
+        node.children.forEach((child) => collectSections(child, map));
+      } else {
+        collectSections(node, map);
+      }
+    }
+    collectAny(originalRoot, originalSections);
+    collectAny(updatedRoot, updatedSections);
 
     originalSections.forEach((origSection, sectionId) => {
       if (!updatedSections.has(sectionId)) return;
@@ -711,9 +1769,13 @@
 
   function buildChangePreview(includeOutline) {
     if (!draft.active) return null;
-    const originalRoot = draft.originalNodes[0] || null;
-    const updatedRoot = draft.workingNodes[0] || null;
-    const result = computeOps(originalRoot, updatedRoot, { parentHeadingId: draft.parentHeadingId });
+    const useList = (draft.workingNodes.length > 1) || (draft.originalNodes.length > 1);
+    const originalRoot = useList ? { __list: true, children: draft.originalNodes.map(cloneSection) } : (draft.originalNodes[0] || null);
+    const updatedRoot = useList ? { __list: true, children: draft.workingNodes.map(cloneSection) } : (draft.workingNodes[0] || null);
+    const result = computeOps(originalRoot, updatedRoot, {
+      parentHeadingId: draft.parentHeadingId,
+      anchorAfterId: draft.anchorAfterBlockId,
+    });
     if (!result) return null;
     const payload = {
       ops: result.ops,
@@ -848,6 +1910,7 @@
     if (!scopeEl || !affectsEl || !publishBtn) return;
 
     affectsEl.innerHTML = '';
+    updateAnchorControls();
 
     if (!draft.active) {
       scopeEl.textContent = 'No section selected';
@@ -879,16 +1942,30 @@
 
     const root = draft.workingNodes[0];
     assignDraftNumbering(root, draft.baseNumbering || '1', draft.baseDepth || 1);
-    if (root.numbering) {
-      scopeEl.textContent = `${root.numbering} · ${root.heading || '(untitled section)'}`;
+    if (draft.sectionId === ROOT_SECTION_ID) {
+      const label = (root.heading && root.heading.trim()) ? root.heading.trim() : '(untitled section)';
+      const numberLabel = root.numbering ? ` ${root.numbering}` : '';
+      scopeEl.textContent = `New top-level section${numberLabel ? ` ${numberLabel}` : ''} · ${label}`;
+      scopeEl.style.color = 'var(--accent)';
     } else {
-      scopeEl.textContent = root.heading || '(untitled section)';
+      if (root.numbering) {
+        scopeEl.textContent = `${root.numbering} · ${root.heading || '(untitled section)'}`;
+      } else {
+        scopeEl.textContent = root.heading || '(untitled section)';
+      }
+      scopeEl.style.color = 'var(--text)';
     }
-    scopeEl.style.color = 'var(--text)';
     scopeEl.style.borderStyle = 'solid';
 
     const preview = buildChangePreview(false);
-    if (preview && preview.affectedBlocks.length) {
+    let canPublish = !!(preview && preview.affectedBlocks.length);
+    if (canPublish && draft.sectionId === ROOT_SECTION_ID) {
+      const headingFilled = !!(root.heading && root.heading.trim().length);
+      const bodyFilled = !!(root.body && root.body.trim().length);
+      const childPresent = Array.isArray(root.children) && root.children.length > 0;
+      canPublish = headingFilled || bodyFilled || childPresent;
+    }
+    if (canPublish) {
       preview.affectedBlocks.forEach((blockId) => {
         const tag = document.createElement('span');
         tag.className = 'tag';
@@ -898,7 +1975,10 @@
       publishBtn.disabled = false;
     } else {
       publishBtn.disabled = true;
-      affectsEl.appendChild(helpMessage('No changes to publish.'));
+      const helpText = draft.sectionId === ROOT_SECTION_ID
+        ? 'Add a heading, body text, or subsections before publishing.'
+        : 'No changes to publish.';
+      affectsEl.appendChild(helpMessage(helpText));
     }
   }
 
@@ -978,88 +2058,26 @@
 
   async function loadChanges() {
     try {
-      document.getElementById('changeHelp').textContent = 'Loading changes…';
+      if (changeHelpEl) changeHelpEl.textContent = 'Loading changes…';
       const stored = localStorage.getItem('gmh_sim_user');
       const simUser = stored || currentUserId;
       const qs = simUser ? `?sim_user=${encodeURIComponent(simUser)}` : '';
       const data = await apiJson(`/api/projects/${entryState.projectId}/changes${qs}`);
       changeState.list = data.changes || [];
-      document.getElementById('changeHelp').textContent = changeState.list.length ? '' : 'No changes yet.';
+      if (changeHelpEl) changeHelpEl.textContent = changeState.list.length ? '' : 'No candidates yet.';
       renderChanges();
     } catch (error) {
-      document.getElementById('changeHelp').textContent = 'Failed to load changes.';
+      if (changeHelpEl) changeHelpEl.textContent = 'Failed to load changes.';
       console.error(error);
     }
   }
 
   function renderChanges() {
-    const list = document.getElementById('changeList');
-    const historyList = document.getElementById('historyList');
-    list.innerHTML = '';
-    if (historyList) historyList.innerHTML = '';
-    if (!changeState.list.length) return;
-
-    changeState.list.forEach((change) => {
-      const yes = change.yes || 0;
-      const no = change.no || 0;
-      const requiredYes = change.required_yes_votes || 0;
-      const totalVotes = yes + no;
-      const approval = totalVotes ? yes / totalVotes : 0;
-      const passing = (typeof change.is_passing === 'boolean')
-        ? change.is_passing
-        : (requiredYes ? yes >= requiredYes : approval >= 0.4);
-      const voted = change.current_user_vote || 0;
-      const sectionLabel = change.target_section_numbering
-        ? `${change.target_section_numbering} ${change.target_section_heading || ''}`.trim()
-        : change.target_section_heading || 'Section';
-      const beforeLines = extractDiffLines(change.before_outline, 'before');
-      const afterLines = extractDiffLines(change.after_outline, 'after');
-      const diffPanel = (beforeLines.length || afterLines.length)
-        ? `<div class="diff-grid">${renderDiffBlock(beforeLines, 'Before')} ${renderDiffBlock(afterLines, 'After')}</div>`
-        : '';
-
-      const card = document.createElement('div');
-      card.className = 'change-card';
-      card.innerHTML = `
-        <div class="row" style="justify-content:space-between;">
-          <div>
-            <strong>${escapeHtml(change.summary || 'Change')}</strong>
-            <div class="mini muted">${escapeHtml(sectionLabel)}</div>
-            <div class="mini muted">${escapeHtml(change.author_name || 'Unknown author')}</div>
-      </div>
-      <div class="row">
-        <span class="pill">${yes} yes / ${no} no</span>
-        ${change.status === 'merged' ? '<span class="pill green">merged</span>' : (passing ? '<span class="pill">merge-ready</span>' : '<span class="pill">needs votes</span>')}
-      </div>
-    </div>
-    ${diffPanel}
-        ${(() => {
-          const yesStatus = requiredYes ? `${yes}/${requiredYes} yes` : `${yes} yes`;
-          if (change.status === 'merged') {
-            return `<div class="footer"><div class="mini muted">Merged · ${escapeHtml(change.author_name || 'Unknown')}</div></div>`;
-          }
-          return `<div class="footer">
-              <div class="vote">
-                <button class="${voted === 1 ? 'good' : ''}" data-act="vote-up" data-id="${change.id}">▲</button>
-                <span class="score">${yes - no}</span>
-                <button class="${voted === -1 ? 'bad' : ''}" data-act="vote-down" data-id="${change.id}">▼</button>
-                <span class="mini muted">${yesStatus} · ${Math.round(approval * 100)}% yes</span>
-              </div>
-              <div class="row">
-                <button ${(!passing ? 'disabled ' : '')}data-act="merge" data-id="${change.id}">Merge</button>
-              </div>
-            </div>`;
-        })()}
-      `;
-      card.querySelectorAll('button[data-act="vote-up"]').forEach((btn) => btn.addEventListener('click', () => vote(change, 1)));
-      card.querySelectorAll('button[data-act="vote-down"]').forEach((btn) => btn.addEventListener('click', () => vote(change, -1)));
-      card.querySelectorAll('button[data-act="merge"]').forEach((btn) => btn.addEventListener('click', () => manualMerge(change)));
-      if (change.status === 'merged' && historyList) {
-        historyList.appendChild(card);
-      } else {
-        list.appendChild(card);
-      }
-    });
+    prepareChangeBuckets();
+    updateSectionStatusChips();
+    refreshRootIndicators();
+    renderCandidatePane();
+    persistWorkspaceLayout();
   }
 
   async function vote(change, value) {
@@ -1076,6 +2094,9 @@
         body: JSON.stringify({ value: next, sim_user: simUser }),
       });
       Object.assign(change, resp.change);
+      // If auto-merge fired, refresh entry + changes to avoid stale base
+      await refreshEntry();
+      await loadChanges();
       renderChanges();
     } catch (error) {
       alert('Vote failed.');
@@ -1156,8 +2177,32 @@
     }
   }
 
+  const addSectionBtn = document.getElementById('btnAddSection');
+  if (addSectionBtn) {
+    addSectionBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      startNewSectionDraft({ afterSectionId: defaultAnchorSectionId() });
+    });
+  }
+
   document.getElementById('btnClear').addEventListener('click', clearDraft);
   document.getElementById('btnPublish').addEventListener('click', publishChange);
+  const saveDraftBtn = document.getElementById('btnSaveDraft');
+  if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveDraftSnapshot);
+
+  (function initLiveChecks(){
+    if (!liveChecksChip) return;
+    try {
+      const savedDraft = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || 'null');
+      if (savedDraft && savedDraft.sectionId) {
+        liveChecksChip.textContent = 'Live checks: draft saved';
+      } else {
+        liveChecksChip.textContent = 'Live checks: stable';
+      }
+    } catch (error) {
+      liveChecksChip.textContent = 'Live checks: stable';
+    }
+  })();
 
   renderUsers();
   renderEntry();

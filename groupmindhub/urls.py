@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.urls import path
 from groupmindhub.apps.web.views import (
-    index, project_detail, entry_detail, change_detail,
+    index, project_detail, entry_detail, change_detail, updates,
     login_view, logout_view, prototype_view, app_view, clone_view,
     project_new, project_star_toggle
 )
@@ -16,6 +16,7 @@ urlpatterns = [
     path('projects/<int:project_id>/', project_detail, name='project_detail'),
     path('projects/new/', project_new, name='project_new'),
     path('entries/<int:entry_id>/', entry_detail, name='entry_detail'),
+    path('updates/', updates, name='updates'),
     path('changes/<int:change_id>/', change_detail, name='change_detail'),
     path('login/', login_view, name='login'),
     path('logout/', logout_view, name='logout'),

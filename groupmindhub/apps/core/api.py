@@ -10,6 +10,8 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from .models import Project, Entry, Change, Vote, Block
 
+ROOT_SECTION_ID = '__root__'
+
 def _apply_sim_user(request):
     """Force simulated user if sim_user provided (even if an authenticated user exists)."""
     sim_user = (
@@ -160,6 +162,8 @@ def serialize_entry(entry: Entry):
 def _normalize_section_block_id(section_id: str) -> str:
     if not section_id:
         return ''
+    if section_id == ROOT_SECTION_ID:
+        return ''
     return section_id if section_id.startswith('h_') else f'h_{section_id}'
 
 
@@ -183,6 +187,7 @@ def serialize_change(p: Change, user=None, section_index=None):
         'id': p.id,
         'summary': p.summary,
         'status': p.status,
+        'base_entry_version_int': p.base_entry_version_int,
         'ops_json': p.ops_json,
         'affected_blocks': p.affected_blocks,
         'before_outline': p.before_outline,
@@ -191,7 +196,11 @@ def serialize_change(p: Change, user=None, section_index=None):
         'target_section_block_id': section_block_id,
         'target_section_numbering': section_info.numbering if section_info else '',
         'target_section_depth': section_info.depth if section_info else 0,
-        'target_section_heading': section_info.heading_text if section_info else '',
+        'target_section_heading': (
+            section_info.heading_text if section_info else (
+                'New section proposal' if p.target_section_id == ROOT_SECTION_ID else ''
+            )
+        ),
         'yes': yes,
         'no': no,
         'current_user_vote': current_vote,
@@ -239,25 +248,78 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
     section_id_raw = (data.get('section_id') or '').strip()
     if not section_id_raw:
         return JsonResponse({'error': 'section_id is required for a change'}, status=400)
-    section_block_id = _normalize_section_block_id(section_id_raw)
     section_index = build_section_index(entry)
-    section_info = section_index.get_by_heading(section_block_id)
-    if not section_info:
-        return JsonResponse({'error': 'section_id does not match any section on the entry'}, status=400)
-    section_id = section_info.section_id
-    allowed_blocks = set(section_info.block_ids)
-    allowed_heading_blocks = set(section_index.by_heading_id.keys()) & allowed_blocks
+    existing_block_ids = set(entry.blocks.values_list('stable_id', flat=True))
+    allow_root_add = section_id_raw == ROOT_SECTION_ID
+    section_block_id = ''
+    section_info = None
+    if allow_root_add:
+        section_id = ROOT_SECTION_ID
+        allowed_blocks = set()
+        allowed_heading_blocks = set()
+    else:
+        section_block_id = _normalize_section_block_id(section_id_raw)
+        section_info = section_index.get_by_heading(section_block_id)
+        if not section_info:
+            return JsonResponse({'error': 'section_id does not match any section on the entry'}, status=400)
+        section_id = section_info.section_id
+        allowed_blocks = set(section_info.block_ids)
+        allowed_heading_blocks = set(section_index.by_heading_id.keys()) & allowed_blocks
 
     def _block_in_scope(block_id):
+        if allow_root_add:
+            # Only allow references to brand-new blocks for new sections
+            return block_id and block_id not in existing_block_ids
         return block_id in allowed_blocks
 
     def _anchor_in_scope(anchor_id):
+        if allow_root_add:
+            return anchor_id in existing_block_ids
         return anchor_id in allowed_blocks
 
     new_heading_ids = set()
     new_block_ids = set()
+    has_root_heading_text = False
     for op in ops:
         op_type = op.get('type')
+        if allow_root_add:
+            if op_type == 'INSERT_BLOCK':
+                nb = op.get('new_block') or {}
+                parent_id = nb.get('parent') or None
+                if parent_id and parent_id not in new_heading_ids:
+                    return JsonResponse({'error': 'new blocks must attach under the proposed section'}, status=400)
+                if nb.get('type') == 'h2':
+                    new_id = nb.get('id')
+                    if not new_id:
+                        new_id = f"h_{uuid.uuid4().hex[:10]}"
+                        nb['id'] = new_id
+                        op['new_block'] = nb
+                    if not str(new_id).startswith('h_'):
+                        return JsonResponse({'error': 'heading ids must start with "h_"'}, status=400)
+                    new_heading_ids.add(str(new_id))
+                    new_block_ids.add(str(new_id))
+                    if (nb.get('text') or '').strip():
+                        has_root_heading_text = True
+                else:
+                    new_id = nb.get('id')
+                    if not new_id:
+                        new_id = f"p_{uuid.uuid4().hex[:10]}"
+                        nb['id'] = new_id
+                        op['new_block'] = nb
+                    new_block_ids.add(str(new_id))
+                after_id = op.get('after_id')
+                if after_id and after_id not in existing_block_ids and after_id not in new_block_ids:
+                    return JsonResponse({'error': 'insert anchors must reference existing or newly inserted blocks'}, status=400)
+                continue
+            if op_type == 'UPDATE_TEXT':
+                bid = op.get('block_id')
+                if bid and bid in new_block_ids:
+                    if bid in new_heading_ids and (op.get('new_text') or '').strip():
+                        has_root_heading_text = True
+                    continue
+                return JsonResponse({'error': 'updates for new sections must target newly inserted blocks'}, status=400)
+            return JsonResponse({'error': 'new section proposals may only insert or update their own blocks'}, status=400)
+
         if op_type in {'UPDATE_TEXT', 'DELETE_BLOCK'}:
             bid = op.get('block_id')
             if bid and not _block_in_scope(bid):
@@ -294,6 +356,8 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
                     return JsonResponse({'error': 'heading ids must start with "h_"'}, status=400)
                 new_heading_ids.add(str(new_id))
                 new_block_ids.add(str(new_id))
+                if (nb.get('text') or '').strip():
+                    has_root_heading_text = True
             else:
                 new_id = nb.get('id')
                 if not new_id:
@@ -304,6 +368,8 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
 
     # Ensure affected blocks are scoped to the section
     affected = [bid for bid in affected if _block_in_scope(bid)]
+    if allow_root_add and not has_root_heading_text:
+        return JsonResponse({'error': 'new section proposals require a heading'}, status=400)
     # Accept client-provided outlines for diff visualization; fallback to simple outline
     provided_before = data.get('before_outline')
     provided_after = data.get('after_outline')
@@ -313,6 +379,7 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
     else:
         before_outline = outline(list(entry.blocks.all()))
         after_outline = outline(list(entry.blocks.all()))
+    now = timezone.now()
     patch = Change.objects.create(
         project=project,
         target_entry=entry,
@@ -325,7 +392,9 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
         after_outline=after_outline,
         target_section_id=section_id,
         status='published',
-        published_at=timezone.now(),
+        base_entry_version_int=entry.entry_version_int,
+        published_at=now,
+        closes_at=now + timezone.timedelta(hours=24),
     )
     # Author auto-upvote (+1)
     Vote.objects.update_or_create(

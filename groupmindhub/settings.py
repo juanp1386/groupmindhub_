@@ -15,8 +15,8 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'django.contrib.staticfiles',
     'whitenoise.runserver_nostatic',
+    'django.contrib.staticfiles',
     'groupmindhub.apps.core.apps.CoreConfig',
     'groupmindhub.apps.web.apps.WebConfig',
 ]

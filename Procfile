@@ -1,1 +1,1 @@
-web: gunicorn groupmindhub.wsgi
+web: gunicorn groupmindhub.wsgi:application

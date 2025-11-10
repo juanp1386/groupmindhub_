@@ -1,24 +1,27 @@
 from __future__ import annotations
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth import authenticate, login, logout
 from django.shortcuts import render, redirect, get_object_or_404
 import json
 from datetime import timedelta
 from django.utils import timezone
-from groupmindhub.apps.core.models import Project, Entry, Change, Vote, Block, Section, ProjectStar, EntryHistory
-from groupmindhub.apps.core.api import serialize_entry, _apply_sim_user
+from groupmindhub.apps.core.models import (
+    Project,
+    Entry,
+    Change,
+    Vote,
+    Block,
+    Section,
+    ProjectStar,
+    EntryHistory,
+    ProjectMembership,
+)
+from groupmindhub.apps.core.api import serialize_entry
 from django.http import HttpResponse
 from pathlib import Path
 
 
 def index(request):
     """Home page listing projects with stars + activity; creation moved to /projects/new/."""
-    # Apply simulated user if provided so starred state reflects the active demo user
-    try:
-        from groupmindhub.apps.core.api import _apply_sim_user as _sim
-        _sim(request)
-    except Exception:
-        pass
     from django.db.models import Count
     from django.utils import timezone
     now = timezone.now()
@@ -53,28 +56,17 @@ def index(request):
     return render(request, 'index.html', { 'projects': rows })
 
 
+@login_required
 def project_new(request):
     """Project creation with section builder (heading + body)."""
-    try:
-        _apply_sim_user(request)
-    except Exception:
-        pass
     if request.method == 'POST':
         name = request.POST.get('name','').strip()
         desc = request.POST.get('description','').strip()
         sections_json = request.POST.get('sections_json','').strip()
-        sim_user = request.POST.get('sim_user')
-        if not request.user.is_authenticated and sim_user:
-            from django.contrib.auth import get_user_model
-            from django.contrib.auth import login as auth_login
-            U = get_user_model()
-            user, _ = U.objects.get_or_create(username=sim_user)
-            auth_login(request, user)
         if name:
             project = Project.objects.create(name=name, description=desc)
-            # Assign author only when authenticated; otherwise leave null
-            author = request.user if request.user.is_authenticated else None
-            entry = Entry.objects.create(project=project, title='Trunk', author=author, status='published')
+            project.add_member(request.user, ProjectMembership.Role.OWNER)
+            entry = Entry.objects.create(project=project, title='Trunk', author=request.user, status='published')
             # Parse sections JSON into nested tree
             try:
                 parsed = json.loads(sections_json) if sections_json else []
@@ -159,14 +151,6 @@ from django.http import JsonResponse
 @csrf_exempt
 @require_POST
 def project_star_toggle(request, project_id: int):
-    sim_user = request.POST.get('sim_user') or request.GET.get('sim_user')
-    if sim_user:
-        # Always honor sim_user: switch session user if provided
-        from django.contrib.auth import get_user_model
-        from django.contrib.auth import login as auth_login
-        U = get_user_model()
-        user, _ = U.objects.get_or_create(username=sim_user)
-        auth_login(request, user)
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'auth required'}, status=401)
     project = get_object_or_404(Project, id=project_id)
@@ -181,8 +165,10 @@ def project_star_toggle(request, project_id: int):
     return JsonResponse({'project_id': project.id, 'starred': starred, 'stars': count})
 
 
+@login_required
 def project_detail(request, project_id: int):
     project = get_object_or_404(Project, id=project_id)
+    project.require_role(request.user, ProjectMembership.Role.VIEWER)
     # Redirect straight to the canonical (only) entry.
     entry = project.entries.order_by('id').first()
     if entry:
@@ -192,6 +178,7 @@ def project_detail(request, project_id: int):
     return redirect('entry_detail', entry_id=entry.id)
 
 
+@login_required
 def entry_detail(request, entry_id: int):
     """Interactive entry page using the exact prototype UI & client logic.
 
@@ -199,6 +186,7 @@ def entry_detail(request, entry_id: int):
     Server persistence of changes/ops can be wired later to existing API endpoints.
     """
     entry = get_object_or_404(Entry.objects.select_related('project'), id=entry_id)
+    membership = entry.project.require_role(request.user, ProjectMembership.Role.VIEWER)
 
     # Build block list from DB (fallback to a default prototype content if empty)
     if entry.blocks.exists():
@@ -241,10 +229,22 @@ def entry_detail(request, entry_id: int):
             'sections': [],
         }
 
+    display_name = request.user.get_full_name() or request.user.get_username()
+    user_payload = {
+        'id': request.user.id,
+        'username': request.user.get_username(),
+        'display_name': display_name,
+        'initial': (display_name or request.user.get_username() or '?')[:1].upper(),
+        'role': membership.role if membership else None,
+        'role_label': membership.get_role_display() if membership else None,
+    }
+
     return render(request, 'entry_detail.html', {
         'entry': entry,
         'ENTRY_JSON': json.dumps(entry_json),
         'entry_sections_tree': entry_json.get('sections_tree') or [],
+        'project_membership': membership,
+        'user_payload': user_payload,
     })
 
 
@@ -263,7 +263,6 @@ def _format_time_remaining(delta):
 
 def updates(request):
     """Personal hub showing open votings, proposals needing attention, and followed activity."""
-    _apply_sim_user(request)
     now = timezone.now()
     selected_projects = request.GET.getlist('project')
     section_query = (request.GET.get('section') or '').strip().lower()
@@ -313,7 +312,7 @@ def updates(request):
             })
 
     your_proposals = []
-    if show_needs and (request.user.is_authenticated or request.GET.get('sim_user')):
+    if show_needs and request.user.is_authenticated:
         personal_qs = Change.objects.select_related('project').filter(author=request.user).order_by('-published_at', '-created_at')[:25]
         for change in personal_qs:
             project_name = change.project.name if change.project_id else 'Project'
@@ -398,27 +397,6 @@ def change_detail(request, change_id: int):
             Vote.objects.update_or_create(user=request.user, target_type="change", target_id=patch.id, defaults={"value": val})
             return redirect(request.path)
     return render(request, "change_detail.html", {"change": patch})
-
-
-def login_view(request):
-    next_url = request.GET.get("next") or request.POST.get("next") or "/"
-    error = None
-    if request.method == "POST":
-        username = request.POST.get("username")
-        password = request.POST.get("password")
-        user = authenticate(request, username=username, password=password)
-        if user is not None:
-            login(request, user)
-            return redirect(next_url)
-        error = "Invalid credentials"
-    return render(request, "login.html", {"next": next_url, "error": error})
-
-
-def logout_view(request):
-    logout(request)
-    return redirect("/")
-
-
 def prototype_view(request):
     """Serve the original static prototype for visual/behavior parity check."""
     # Load the existing prototype.html from repo root.

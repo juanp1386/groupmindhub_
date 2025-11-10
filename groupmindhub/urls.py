@@ -2,9 +2,10 @@ from django.contrib import admin
 from django.urls import path
 from groupmindhub.apps.web.views import (
     index, project_detail, entry_detail, change_detail, updates,
-    login_view, logout_view, prototype_view, app_view, clone_view,
+    prototype_view, app_view, clone_view,
     project_new, project_star_toggle
 )
+from groupmindhub.apps.web.views_auth import login_view, logout_view, signup_view
 from groupmindhub.apps.core.api import (
     api_project_entry, api_project_changes_list, api_project_changes_create,
     api_change_vote, api_change_merge
@@ -20,6 +21,7 @@ urlpatterns = [
     path('changes/<int:change_id>/', change_detail, name='change_detail'),
     path('login/', login_view, name='login'),
     path('logout/', logout_view, name='logout'),
+    path('signup/', signup_view, name='signup'),
     path('prototype/', prototype_view, name='prototype'),
     path('clone/', clone_view, name='clone'),
     path('app/', app_view, name='app_default'),

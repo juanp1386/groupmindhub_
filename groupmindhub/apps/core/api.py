@@ -8,27 +8,18 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Project, Entry, Change, Vote, Block
+from .models import Project, Entry, Change, Vote, Block, ProjectMembership
 
 ROOT_SECTION_ID = '__root__'
 
-def _apply_sim_user(request):
-    """Force simulated user if sim_user provided (even if an authenticated user exists)."""
-    sim_user = (
-        request.GET.get('sim_user')
-        or request.POST.get('sim_user')
-    )
-    if not sim_user and request.body:
-        try:
-            body = json.loads(request.body or b"{}")
-            sim_user = body.get('sim_user')
-        except Exception:
-            sim_user = None
-    if sim_user:
-        from django.contrib.auth import get_user_model
-        U = get_user_model()
-        request.user, _ = U.objects.get_or_create(username=sim_user)
-    return request.user
+
+def _membership_or_error(request: HttpRequest, project: Project, role: str):
+    if not request.user.is_authenticated:
+        return None, JsonResponse({'error': 'auth required'}, status=401)
+    membership = project.memberships.filter(user=request.user).first()
+    if not membership or not membership.has_at_least(role):
+        return None, JsonResponse({'error': 'forbidden'}, status=403)
+    return membership, None
 from .logic import (
     outline,
     auto_merge,
@@ -213,6 +204,9 @@ def serialize_change(p: Change, user=None, section_index=None):
 @require_http_methods(["GET"])
 def api_project_entry(request: HttpRequest, project_id: int):
     project = get_object_or_404(Project, id=project_id)
+    _membership, error = _membership_or_error(request, project, ProjectMembership.Role.VIEWER)
+    if error:
+        return error
     entry = project.entries.order_by('-entry_version_int').first()
     if not entry:
         return JsonResponse({'project': project_id, 'entry': None})
@@ -222,7 +216,9 @@ def api_project_entry(request: HttpRequest, project_id: int):
 @require_http_methods(["GET"])
 def api_project_changes_list(request: HttpRequest, project_id: int):
     project = get_object_or_404(Project, id=project_id)
-    _apply_sim_user(request)
+    membership, error = _membership_or_error(request, project, ProjectMembership.Role.VIEWER)
+    if error:
+        return error
     section_indices: Dict[int, SectionIndex] = {}
     serialized = []
     for change in project.changes.select_related('target_entry').all():
@@ -240,7 +236,9 @@ def api_project_changes_list(request: HttpRequest, project_id: int):
 def api_project_changes_create(request: HttpRequest, project_id: int):
     project = get_object_or_404(Project, id=project_id)
     data = json.loads(request.body or b"{}")
-    _apply_sim_user(request)
+    membership, error = _membership_or_error(request, project, ProjectMembership.Role.EDITOR)
+    if error:
+        return error
     entry_id = data.get('entry_id')
     entry = get_object_or_404(Entry, id=entry_id, project=project)
     ops = data.get('ops_json') or []
@@ -409,7 +407,9 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
 def api_change_vote(request: HttpRequest, change_id: int):
     patch = get_object_or_404(Change, id=change_id)
     data = json.loads(request.body or b"{}")
-    _apply_sim_user(request)
+    _membership, error = _membership_or_error(request, patch.project, ProjectMembership.Role.VIEWER)
+    if error:
+        return error
     val = int(data.get('value', 0))
     if val not in (-1, 0, 1):
         return JsonResponse({'error': 'invalid vote'}, status=400)
@@ -427,7 +427,9 @@ def api_change_vote(request: HttpRequest, change_id: int):
 @require_http_methods(["POST"])
 def api_change_merge(request: HttpRequest, change_id: int):
     patch = get_object_or_404(Change, id=change_id)
-    _apply_sim_user(request)
+    _membership, error = _membership_or_error(request, patch.project, ProjectMembership.Role.OWNER)
+    if error:
+        return error
     if patch.status != 'merged':
         if not is_passing(patch):
             required_yes = max(1, math.ceil(0.4 * SIM_USER_POOL_SIZE))

@@ -5,9 +5,18 @@ from django.db import models
 
 
 class Project(models.Model):
+    class Visibility(models.TextChoices):
+        PUBLIC = 'public', 'Public'
+        PRIVATE = 'private', 'Private'
+
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    visibility = models.CharField(
+        max_length=20,
+        choices=Visibility.choices,
+        default=Visibility.PUBLIC,
+    )
 
     def __str__(self):
         return self.name
@@ -34,9 +43,13 @@ class Project(models.Model):
             return False
         return membership.has_at_least(role)
 
-    def require_role(self, user, role: str):
+    def require_role(self, user, role: str, invite=None):
         membership = self.membership_for(user)
         if membership and membership.has_at_least(role):
+            return membership
+        if invite and role == ProjectMembership.Role.VIEWER and invite.allows(role):
+            return None
+        if role == ProjectMembership.Role.VIEWER and self.visibility == self.Visibility.PUBLIC:
             return membership
         raise PermissionDenied("You do not have access to this project.")
 
@@ -199,3 +212,92 @@ class ProjectMembership(models.Model):
     @property
     def is_editor(self) -> bool:
         return self.has_at_least(self.Role.EDITOR)
+
+
+class ProjectInvite(models.Model):
+    project = models.ForeignKey(Project, related_name='invites', on_delete=models.CASCADE)
+    email = models.EmailField()
+    role = models.CharField(max_length=20, choices=ProjectMembership.Role.choices, default=ProjectMembership.Role.VIEWER)
+    token = models.CharField(max_length=100, unique=True, editable=False)
+    inviter = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='project_invites_sent', on_delete=models.CASCADE)
+    invited_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        related_name='project_invites',
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    declined_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['project_id', 'email']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['project', 'email'],
+                condition=models.Q(accepted_at__isnull=True, declined_at__isnull=True),
+                name='unique_active_invite_per_project_email',
+            )
+        ]
+
+    def __str__(self):
+        return f"Invite(p={self.project_id},email={self.email},role={self.role})"
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def generate_token() -> str:
+        import secrets
+
+        return secrets.token_urlsafe(32)
+
+    def allows(self, role: str) -> bool:
+        required = ProjectMembership.ROLE_ORDER.get(role, 0)
+        invite_role = ProjectMembership.ROLE_ORDER.get(self.role, 0)
+        return invite_role >= required
+
+    @property
+    def is_active(self) -> bool:
+        return not self.accepted_at and not self.declined_at
+
+    def accept(self, user):
+        from django.utils import timezone
+
+        membership = self.project.add_member(user, self.role)
+        self.accepted_at = timezone.now()
+        self.declined_at = None
+        self.invited_user = user
+        self.save(update_fields=['accepted_at', 'declined_at', 'invited_user'])
+        return membership
+
+    def decline(self, user=None):
+        from django.utils import timezone
+
+        self.declined_at = timezone.now()
+        if user:
+            self.invited_user = user
+        self.save(update_fields=['declined_at', 'invited_user'])
+
+    def get_signed_token(self):
+        from django.core import signing
+
+        signer = signing.TimestampSigner(salt='project-invite')
+        return signer.sign(self.token)
+
+    @classmethod
+    def from_signed_token(cls, signed_token: str):
+        from django.core import signing
+
+        signer = signing.TimestampSigner(salt='project-invite')
+        try:
+            token = signer.unsign(signed_token)
+        except signing.BadSignature:
+            return None
+        return cls.objects.filter(token=token).first()
+
+    def save(self, *args, **kwargs):
+        if self.email:
+            self.email = self.email.lower()
+        if not self.token:
+            self.token = self.generate_token()
+        super().save(*args, **kwargs)

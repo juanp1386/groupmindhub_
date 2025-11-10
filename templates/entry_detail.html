@@ -300,6 +300,9 @@
         <div class="head-links">
           <a href="/" class="pill">Home</a>
           <a href="/updates/" class="pill">Updates</a>
+          {% if project_membership and project_membership.is_owner %}
+          <a href="{% url 'project_settings' entry.project.id %}" class="pill">Settings</a>
+          {% endif %}
         </div>
         <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
           <span class="toggle-track"><span class="toggle-thumb"></span></span>

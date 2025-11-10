@@ -3,7 +3,8 @@ from django.urls import path
 from groupmindhub.apps.web.views import (
     index, project_detail, entry_detail, change_detail, updates,
     prototype_view, app_view, clone_view,
-    project_new, project_star_toggle
+    project_new, project_star_toggle,
+    project_settings, project_invite_accept, project_invite_decline,
 )
 from groupmindhub.apps.web.views_auth import login_view, logout_view, signup_view
 from groupmindhub.apps.core.api import (
@@ -15,6 +16,9 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', index, name='index'),
     path('projects/<int:project_id>/', project_detail, name='project_detail'),
+    path('projects/<int:project_id>/settings/', project_settings, name='project_settings'),
+    path('projects/<int:project_id>/invites/<str:signed_token>/accept/', project_invite_accept, name='project_invite_accept'),
+    path('projects/<int:project_id>/invites/<str:signed_token>/decline/', project_invite_decline, name='project_invite_decline'),
     path('projects/new/', project_new, name='project_new'),
     path('entries/<int:entry_id>/', entry_detail, name='entry_detail'),
     path('updates/', updates, name='updates'),

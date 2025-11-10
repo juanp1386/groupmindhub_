@@ -1,7 +1,14 @@
 import json
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
-from groupmindhub.apps.core.models import Block, Change, Entry, Project, ProjectMembership
+from groupmindhub.apps.core.models import (
+    Block,
+    Change,
+    Entry,
+    Project,
+    ProjectMembership,
+    ProjectInvite,
+)
 
 
 class ChangeApiTests(TestCase):
@@ -114,3 +121,22 @@ class ChangeApiTests(TestCase):
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_private_project_requires_invite(self):
+        private = Project.objects.create(name='Private Project', visibility=Project.Visibility.PRIVATE)
+        Entry.objects.create(project=private, title='Secret Entry', author=self.user)
+        ProjectMembership.objects.create(project=private, user=self.user, role=ProjectMembership.Role.OWNER)
+        outsider = get_user_model().objects.create_user('outsider2', password='test-pass-123')
+        client = Client()
+        client.force_login(outsider)
+        response = client.get(f'/api/projects/{private.id}/entry')
+        self.assertEqual(response.status_code, 403)
+        invite = ProjectInvite.objects.create(
+            project=private,
+            email='invitee@example.com',
+            role=ProjectMembership.Role.VIEWER,
+            inviter=self.user,
+        )
+        signed = invite.get_signed_token()
+        response = client.get(f'/api/projects/{private.id}/entry?invite={signed}')
+        self.assertEqual(response.status_code, 200)

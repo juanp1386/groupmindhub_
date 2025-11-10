@@ -18,6 +18,25 @@
         <label for="projectDescription">Short description</label>
         <textarea id="projectDescription" name="description" rows="3" placeholder="What is this project about?"></textarea>
       </div>
+      <div class="field">
+        <label for="projectVisibility">Visibility</label>
+        <select id="projectVisibility" name="visibility">
+          <option value="public" selected>Public — anyone can view</option>
+          <option value="private">Private — only invited members</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="projectInvites">Invite teammates</label>
+        <textarea id="projectInvites" name="invite_emails" rows="3" placeholder="Add email addresses, one per line"></textarea>
+        <small class="muted">We’ll generate shareable invite links and send them from the settings page.</small>
+      </div>
+      <div class="field">
+        <label for="projectInviteRole">Default invite role</label>
+        <select id="projectInviteRole" name="invite_role">
+          <option value="viewer" selected>Viewer</option>
+          <option value="editor">Editor</option>
+        </select>
+      </div>
     </section>
     <section class="project-doc">
       <div class="doc-head">

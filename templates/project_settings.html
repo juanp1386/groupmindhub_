@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="project-settings">
+  <header class="page-head">
+    <div>
+      <h1>{{ project.name }} settings</h1>
+      <p class="muted">Manage visibility, members, and invitations.</p>
+    </div>
+    <a class="ghost" href="{% url 'project_detail' project.id %}">Back to project</a>
+  </header>
+
+  <section class="settings-card">
+    <h2>Visibility</h2>
+    <form method="post" class="settings-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="visibility" />
+      <label for="visibilitySelect">Who can view this project?</label>
+      <select id="visibilitySelect" name="visibility">
+        {% for value, label in visibility_choices %}
+        <option value="{{ value }}" {% if project.visibility == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="primary">Update visibility</button>
+    </form>
+    <p class="muted small">Private projects require an invitation link to view. Public projects are visible to all authenticated users.</p>
+  </section>
+
+  <section class="settings-card">
+    <h2>Invitations</h2>
+    <form method="post" class="invite-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="invite" />
+      <div class="field-row">
+        {{ invite_form.email.label_tag }}
+        {{ invite_form.email }}
+        {% if invite_form.email.errors %}
+        <div class="form-error">{{ invite_form.email.errors|join:', ' }}</div>
+        {% endif %}
+      </div>
+      <div class="field-row">
+        {{ invite_form.role.label_tag }}
+        {{ invite_form.role }}
+        {% if invite_form.role.errors %}
+        <div class="form-error">{{ invite_form.role.errors|join:', ' }}</div>
+        {% endif %}
+      </div>
+      <button class="primary">Send invite</button>
+    </form>
+    {% if invite_rows %}
+    <table class="settings-table">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Invite link</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in invite_rows %}
+        <tr>
+          <td>{{ row.invite.email }}</td>
+          <td>{{ row.invite.get_role_display }}</td>
+          <td class="invite-link"><code>{{ row.accept_url }}</code></td>
+          <td class="actions">
+            <form method="post" class="inline-form">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="cancel" />
+              <input type="hidden" name="invite_id" value="{{ row.invite.id }}" />
+              <button class="ghost" type="submit">Cancel</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No pending invitations. Use the form above to invite teammates.</p>
+    {% endif %}
+  </section>
+
+  <section class="settings-card">
+    <h2>Members</h2>
+    {% if memberships %}
+    <ul class="member-list">
+      {% for membership in memberships %}
+      <li>
+        <strong>{{ membership.user.get_full_name|default:membership.user.username }}</strong>
+        <span class="muted">{{ membership.get_role_display }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No members yet.</p>
+    {% endif %}
+  </section>
+</section>
+<style>
+  .project-settings{display:flex;flex-direction:column;gap:32px;margin-bottom:64px;}
+  .settings-card{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:24px 28px;box-shadow:0 18px 36px var(--shadow);background-image:var(--grain-pattern);background-blend-mode:overlay;}
+  .settings-card h2{margin:0 0 16px;font-size:20px;}
+  .settings-form,.invite-form{display:flex;flex-direction:column;gap:12px;max-width:420px;}
+  .settings-form select,.invite-form input,.invite-form select{max-width:260px;}
+  .invite-form .field-row{display:flex;flex-direction:column;gap:6px;}
+  .settings-table{width:100%;border-collapse:collapse;margin-top:18px;}
+  .settings-table th,.settings-table td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);}
+  .settings-table th{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+  .settings-table td.invite-link code{display:block;word-break:break-all;font-size:12px;background:rgba(0,0,0,0.05);padding:6px 8px;border-radius:8px;}
+  [data-theme='dark'] .settings-table td.invite-link code{background:rgba(255,255,255,0.08);}
+  .settings-table td.actions{width:80px;text-align:right;}
+  .inline-form{display:inline;}
+  .member-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;}
+  .member-list li{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--panel-soft);}
+  .member-list .muted{font-size:12px;text-transform:uppercase;letter-spacing:.08em;}
+  .muted.small{font-size:12px;display:block;margin-top:6px;}
+  .form-error{color:#c0392b;font-size:12px;}
+</style>
+{% endblock %}

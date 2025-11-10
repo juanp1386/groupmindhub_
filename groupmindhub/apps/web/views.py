@@ -1,6 +1,8 @@
 from __future__ import annotations
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 import json
 from datetime import timedelta
 from django.utils import timezone
@@ -14,10 +16,15 @@ from groupmindhub.apps.core.models import (
     ProjectStar,
     EntryHistory,
     ProjectMembership,
+    ProjectInvite,
 )
 from groupmindhub.apps.core.api import serialize_entry
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseForbidden
+from django.core.exceptions import PermissionDenied
 from pathlib import Path
+
+from .forms import ProjectInviteForm
+from groupmindhub.apps.core.access import resolve_invite, forget_invite
 
 
 def index(request):
@@ -62,11 +69,32 @@ def project_new(request):
     if request.method == 'POST':
         name = request.POST.get('name','').strip()
         desc = request.POST.get('description','').strip()
+        visibility = request.POST.get('visibility', Project.Visibility.PUBLIC)
+        if visibility not in Project.Visibility.values:
+            visibility = Project.Visibility.PUBLIC
         sections_json = request.POST.get('sections_json','').strip()
         if name:
-            project = Project.objects.create(name=name, description=desc)
+            project = Project.objects.create(name=name, description=desc, visibility=visibility)
             project.add_member(request.user, ProjectMembership.Role.OWNER)
             entry = Entry.objects.create(project=project, title='Trunk', author=request.user, status='published')
+            seed_invites_raw = request.POST.get('invite_emails', '').strip()
+            seed_invite_role = request.POST.get('invite_role') or ProjectMembership.Role.VIEWER
+            if seed_invite_role not in dict(ProjectMembership.Role.choices):
+                seed_invite_role = ProjectMembership.Role.VIEWER
+            if seed_invites_raw:
+                emails = set()
+                for line in seed_invites_raw.replace(',', '\n').splitlines():
+                    email = line.strip()
+                    if email:
+                        emails.add(email.lower())
+                for email in emails:
+                    ProjectInvite.objects.create(
+                        project=project,
+                        email=email,
+                        role=seed_invite_role,
+                        inviter=request.user,
+                        token=ProjectInvite.generate_token(),
+                    )
             # Parse sections JSON into nested tree
             try:
                 parsed = json.loads(sections_json) if sections_json else []
@@ -166,9 +194,37 @@ def project_star_toggle(request, project_id: int):
 
 
 @login_required
+def project_invite_accept(request, project_id: int, signed_token: str):
+    project = get_object_or_404(Project, id=project_id)
+    invite = ProjectInvite.from_signed_token(signed_token)
+    if not invite or invite.project_id != project.id or not invite.is_active:
+        return HttpResponseForbidden()
+    invite.accept(request.user)
+    forget_invite(request, project.id)
+    messages.success(request, 'You have joined the project.')
+    return redirect('project_detail', project_id=project.id)
+
+
+@login_required
+def project_invite_decline(request, project_id: int, signed_token: str):
+    project = get_object_or_404(Project, id=project_id)
+    invite = ProjectInvite.from_signed_token(signed_token)
+    if not invite or invite.project_id != project.id or not invite.is_active:
+        return HttpResponseForbidden()
+    invite.decline(request.user)
+    forget_invite(request, project.id)
+    messages.info(request, 'Invitation declined.')
+    return redirect('index')
+
+
+@login_required
 def project_detail(request, project_id: int):
     project = get_object_or_404(Project, id=project_id)
-    project.require_role(request.user, ProjectMembership.Role.VIEWER)
+    invite = resolve_invite(request, project, persist=True)
+    try:
+        project.require_role(request.user, ProjectMembership.Role.VIEWER, invite=invite)
+    except PermissionDenied:
+        return HttpResponseForbidden()
     # Redirect straight to the canonical (only) entry.
     entry = project.entries.order_by('id').first()
     if entry:
@@ -179,6 +235,69 @@ def project_detail(request, project_id: int):
 
 
 @login_required
+def project_settings(request, project_id: int):
+    project = get_object_or_404(Project, id=project_id)
+    project.require_role(request.user, ProjectMembership.Role.OWNER)
+    invite_form = ProjectInviteForm()
+    if request.method == 'POST':
+        action = request.POST.get('action') or ''
+        if action == 'invite':
+            invite_form = ProjectInviteForm(request.POST)
+            if invite_form.is_valid():
+                email = invite_form.cleaned_data['email'].lower()
+                role = invite_form.cleaned_data['role']
+                existing = project.invites.filter(email=email, accepted_at__isnull=True, declined_at__isnull=True).first()
+                if existing:
+                    existing.role = role
+                    existing.inviter = request.user
+                    existing.save(update_fields=['role', 'inviter'])
+                    messages.success(request, f'Updated invitation for {email}.')
+                else:
+                    ProjectInvite.objects.create(
+                        project=project,
+                        email=email,
+                        role=role,
+                        inviter=request.user,
+                        token=ProjectInvite.generate_token(),
+                    )
+                    messages.success(request, f'Sent invitation to {email}.')
+                return redirect('project_settings', project_id=project.id)
+        elif action == 'cancel':
+            invite_id = request.POST.get('invite_id')
+            invite = get_object_or_404(ProjectInvite, id=invite_id, project=project)
+            invite.delete()
+            messages.success(request, f'Cancelled invitation for {invite.email}.')
+            return redirect('project_settings', project_id=project.id)
+        elif action == 'visibility':
+            new_visibility = request.POST.get('visibility', project.visibility)
+            if new_visibility in Project.Visibility.values:
+                project.visibility = new_visibility
+                project.save(update_fields=['visibility'])
+                messages.success(request, 'Project visibility updated.')
+                return redirect('project_settings', project_id=project.id)
+
+    active_invites = list(project.invites.filter(accepted_at__isnull=True, declined_at__isnull=True).order_by('email'))
+    invite_rows = []
+    for invite in active_invites:
+        signed = invite.get_signed_token()
+        invite_rows.append({
+            'invite': invite,
+            'accept_url': request.build_absolute_uri(reverse('project_invite_accept', args=[project.id, signed])),
+            'decline_url': request.build_absolute_uri(reverse('project_invite_decline', args=[project.id, signed])),
+        })
+
+    memberships = project.memberships.select_related('user').order_by('-role', 'user__username')
+
+    return render(request, 'project_settings.html', {
+        'project': project,
+        'memberships': memberships,
+        'invite_rows': invite_rows,
+        'invite_form': invite_form,
+        'visibility_choices': Project.Visibility.choices,
+    })
+
+
+@login_required
 def entry_detail(request, entry_id: int):
     """Interactive entry page using the exact prototype UI & client logic.
 
@@ -186,7 +305,12 @@ def entry_detail(request, entry_id: int):
     Server persistence of changes/ops can be wired later to existing API endpoints.
     """
     entry = get_object_or_404(Entry.objects.select_related('project'), id=entry_id)
-    membership = entry.project.require_role(request.user, ProjectMembership.Role.VIEWER)
+    project = entry.project
+    invite = resolve_invite(request, project, persist=True)
+    try:
+        membership = project.require_role(request.user, ProjectMembership.Role.VIEWER, invite=invite)
+    except PermissionDenied:
+        return HttpResponseForbidden()
 
     # Build block list from DB (fallback to a default prototype content if empty)
     if entry.blocks.exists():
@@ -378,6 +502,13 @@ def updates(request):
 
 def change_detail(request, change_id: int):
     patch = get_object_or_404(Change, id=change_id)
+    project = patch.project
+    if project:
+        invite = resolve_invite(request, project, persist=True)
+        try:
+            project.require_role(request.user, ProjectMembership.Role.VIEWER, invite=invite)
+        except PermissionDenied:
+            return HttpResponseForbidden()
     if request.method == "POST":
         act = request.POST.get("action")
         if act == "publish_change" and patch.status == "draft":

@@ -9,17 +9,25 @@ from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from .models import Project, Entry, Change, Vote, Block, ProjectMembership
+from .access import resolve_invite
 
 ROOT_SECTION_ID = '__root__'
 
 
 def _membership_or_error(request: HttpRequest, project: Project, role: str):
+    membership = project.membership_for(request.user)
+    invite = resolve_invite(request, project, persist=True)
+    if membership and membership.has_at_least(role):
+        return membership, None
+    is_safe_method = request.method in {'GET', 'HEAD', 'OPTIONS'}
+    if role == ProjectMembership.Role.VIEWER and is_safe_method:
+        if project.visibility == Project.Visibility.PUBLIC:
+            return membership, None
+        if invite and invite.allows(role):
+            return membership, None
     if not request.user.is_authenticated:
         return None, JsonResponse({'error': 'auth required'}, status=401)
-    membership = project.memberships.filter(user=request.user).first()
-    if not membership or not membership.has_at_least(role):
-        return None, JsonResponse({'error': 'forbidden'}, status=403)
-    return membership, None
+    return None, JsonResponse({'error': 'forbidden'}, status=403)
 from .logic import (
     outline,
     auto_merge,

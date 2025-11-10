@@ -1,8 +1,8 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class="auth-card">
-  <h1>Sign in</h1>
-  <p class="muted">Use your GroupMindHub account to continue.</p>
+  <h1>Create account</h1>
+  <p class="muted">Join GroupMindHub to collaborate on projects.</p>
   <form method="post" novalidate class="auth-form">
     {% csrf_token %}
     <input type="hidden" name="next" value="{{ next }}" />
@@ -13,13 +13,14 @@
       <div class="form-field">
         <label for="{{ field.id_for_label }}">{{ field.label }}</label>
         {{ field }}
+        {% if field.help_text %}<div class="muted mini">{{ field.help_text }}</div>{% endif %}
         {% if field.errors %}
           <div class="field-errors">{{ field.errors|join:' ' }}</div>
         {% endif %}
       </div>
     {% endfor %}
-    <button class="primary">Login</button>
+    <button class="primary">Sign up</button>
   </form>
-  <p class="muted">Need an account? <a href="{% url 'signup' %}?next={{ next|urlencode }}">Sign up</a>.</p>
+  <p class="muted">Already have an account? <a href="{% url 'login' %}?next={{ next|urlencode }}">Sign in</a>.</p>
 </section>
 {% endblock %}

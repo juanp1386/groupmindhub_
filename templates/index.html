@@ -48,7 +48,6 @@
 {% block extra_js %}
 <script>
 (function(){
-  const key='gmh_sim_user';
   const filterSel=document.getElementById('projFilter');
   const table=document.getElementById('projectsTable');
   if(!filterSel || !table){return;}
@@ -91,14 +90,6 @@
       const projectId=row.getAttribute('data-project-id');
       if(!projectId){return;}
       const formData=new FormData();
-      let simUser='';
-      try{
-        simUser=localStorage.getItem(key)||'';
-      }catch(e){}
-      if(!simUser && document && document.body){
-        simUser=document.body.getAttribute('data-sim-user')||'';
-      }
-      if(simUser){ formData.append('sim_user', simUser); }
       try{
         const response=await fetch(`/api/projects/${projectId}/star-toggle`, {
           method:'POST',

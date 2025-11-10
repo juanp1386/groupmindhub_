@@ -54,9 +54,15 @@
     [data-theme='dark'] .brand-logo-dark{display:block}
     .head-controls{display:flex;align-items:center;gap:18px}
     .head-links{display:flex;align-items:center;gap:10px}
-    .sim-block{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
-    .sim-block select{padding:5px 10px;font-size:13px;border-radius:8px;background:var(--panel-soft);color:var(--text);border:1px solid var(--border)}
-    .sim-label{font-size:12px;font-weight:600}
+    .user-panel{display:flex;align-items:center;gap:14px}
+    .user-chip{display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:999px;background:rgba(var(--accent-rgb),0.16);border:1px solid rgba(var(--accent-rgb),0.35)}
+    .user-avatar{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--panel);border:1px solid var(--border);font-weight:600;letter-spacing:.02em;color:var(--accent)}
+    .user-meta{display:flex;flex-direction:column;line-height:1.2}
+    .user-name{font-size:13px;font-weight:600;color:var(--text)}
+    .user-role{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+    .logout-form{margin:0}
+    .logout-form button{background:transparent;border:none;font-size:12px;color:var(--muted);padding:0 0 0 8px;text-decoration:underline;cursor:pointer}
+    .logout-form button:hover{color:var(--accent)}
     select,button,input,textarea{background:var(--panel-soft);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-family:inherit;font-size:14px}
     select:focus,input:focus,textarea:focus{outline:2px solid rgba(var(--accent-rgb),0.45)}
     button{cursor:pointer;transition:all .18s ease}
@@ -299,16 +305,33 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
           <span class="toggle-label" id="themeToggleLabel">Light</span>
         </button>
-        <div class="sim-block">
-          <span class="sim-label">Sim user:</span>
-          <select id="userSelect"></select>
-          <span class="user-dot" id="userDot" title="current user"></span>
+        <div class="user-panel">
+          {% if user.is_authenticated %}
+            {% with user.get_full_name|default:user.get_username as display_name %}
+            <div class="user-chip">
+              <span class="user-avatar">{{ display_name|slice:':1'|upper }}</span>
+              <span class="user-meta">
+                <span class="user-name">{{ display_name }}</span>
+                {% if project_membership %}
+                  <span class="user-role">{{ project_membership.get_role_display }}</span>
+                {% else %}
+                  <span class="user-role">Signed in</span>
+                {% endif %}
+              </span>
+              <form method="post" action="{% url 'logout' %}" class="logout-form">
+                {% csrf_token %}
+                <button type="submit">Logout</button>
+              </form>
+            </div>
+            {% endwith %}
+          {% endif %}
         </div>
       </div>
     </div>
   </header>
   <main class="wrap" style="padding:32px 0 48px;">
     <script type="application/json" id="__entry_json">{{ ENTRY_JSON|safe }}</script>
+    {% if user_payload %}{{ user_payload|json_script:"__gmh_user" }}{% endif %}
     <section class="project-banner">
       <div>
         <h1>{{ entry.project.name }}</h1>

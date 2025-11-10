@@ -1,5 +1,6 @@
 from __future__ import annotations
 from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.db import models
 
 
@@ -10,6 +11,34 @@ class Project(models.Model):
 
     def __str__(self):
         return self.name
+
+    # --- membership helpers -------------------------------------------------
+    def add_member(self, user, role: str = None):
+        """Add or update a membership for the given user."""
+        if role is None:
+            role = ProjectMembership.Role.VIEWER
+        membership, _created = self.memberships.update_or_create(
+            user=user,
+            defaults={'role': role},
+        )
+        return membership
+
+    def membership_for(self, user):
+        if not user or not getattr(user, 'is_authenticated', False):
+            return None
+        return self.memberships.filter(user=user).first()
+
+    def has_role(self, user, role: str):
+        membership = self.membership_for(user)
+        if not membership:
+            return False
+        return membership.has_at_least(role)
+
+    def require_role(self, user, role: str):
+        membership = self.membership_for(user)
+        if membership and membership.has_at_least(role):
+            return membership
+        raise PermissionDenied("You do not have access to this project.")
 
 
 class Entry(models.Model):
@@ -131,3 +160,42 @@ class ProjectStar(models.Model):
 
     def __str__(self):
         return f"Star(p={self.project_id},u={self.user_id})"
+
+
+class ProjectMembership(models.Model):
+    class Role(models.TextChoices):
+        OWNER = 'owner', 'Owner'
+        EDITOR = 'editor', 'Editor'
+        VIEWER = 'viewer', 'Viewer'
+
+    ROLE_ORDER = {
+        Role.VIEWER: 1,
+        Role.EDITOR: 2,
+        Role.OWNER: 3,
+    }
+
+    project = models.ForeignKey(Project, related_name='memberships', on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='project_memberships', on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.VIEWER)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('project', 'user')
+        ordering = ['project_id', 'user_id']
+
+    def __str__(self):
+        return f"Membership(p={self.project_id},u={self.user_id},role={self.role})"
+
+    # Helper methods ---------------------------------------------------------
+    def has_at_least(self, role: str) -> bool:
+        required = self.ROLE_ORDER.get(role, 0)
+        current = self.ROLE_ORDER.get(self.role, 0)
+        return current >= required
+
+    @property
+    def is_owner(self) -> bool:
+        return self.role == self.Role.OWNER
+
+    @property
+    def is_editor(self) -> bool:
+        return self.has_at_least(self.Role.EDITOR)

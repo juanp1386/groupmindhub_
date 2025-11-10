@@ -103,17 +103,29 @@
     th{background:var(--panel-soft);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-size:12px}
     .muted{color:var(--muted);font-size:12px}
     .status-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;background:rgba(var(--accent-rgb),0.18);color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.35)}
-    .sim-block{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}
-    .sim-block select{padding:5px 10px;font-size:13px;border-radius:8px;background:var(--panel-soft);color:var(--text);border:1px solid var(--border)}
-    .sim-label{font-size:12px;font-weight:600}
-    .user-dot{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--panel);border:1px solid var(--border);font-size:12px;color:var(--accent)}
+    .user-panel{display:flex;align-items:center;gap:14px}
+    .user-chip{display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:999px;background:rgba(var(--accent-rgb),0.16);border:1px solid rgba(var(--accent-rgb),0.35);}
+    .user-avatar{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--panel);border:1px solid var(--border);font-weight:600;letter-spacing:.02em;color:var(--accent)}
+    .user-meta{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+    .user-name{font-size:13px;font-weight:600;color:var(--text)}
+    .user-role{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
     .auth-links{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
     .auth-links a{color:inherit}
+    .logout-form{margin:0}
+    .logout-form button{background:transparent;border:none;font-size:12px;color:var(--muted);padding:0 0 0 8px;text-decoration:underline;cursor:pointer}
+    .logout-form button:hover{color:var(--accent)}
+    .auth-card{max-width:420px;margin:48px auto;padding:32px;border-radius:16px;background:var(--panel);border:1px solid var(--border);box-shadow:0 16px 36px var(--shadow);display:flex;flex-direction:column;gap:18px}
+    .auth-card h1{margin:0}
+    .auth-form{display:flex;flex-direction:column;gap:16px}
+    .auth-form .form-field{display:flex;flex-direction:column;gap:6px}
+    .auth-form input{width:100%}
+    .form-errors,.field-errors{font-size:12px;color:#c23d3d;background:rgba(194,61,61,0.12);padding:8px 12px;border-radius:8px;border:1px solid rgba(194,61,61,0.4)}
+    .mini{font-size:12px}
     main.wrap{padding-top:48px}
     [data-theme='dark'] .status-pill{background:rgba(var(--accent-rgb),0.25);color:var(--text);border-color:rgba(255,255,255,0.25)}
   </style>
 </head>
-<body data-sim-user="{{ request.user.username|default_if_none:''|escape }}">
+<body>
   <header>
     <div class="wrap site-head">
       <div class="brand">
@@ -131,24 +143,30 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
           <span class="toggle-label" id="themeToggleLabel">Light</span>
         </button>
-        <div class="sim-block">
-          <span class="sim-label">Sim user:</span>
-          <select id="simUserSelect">
-            <option value="">(none)</option>
-            <option value="ana">ana</option>
-            <option value="ben">ben</option>
-            <option value="chen">chen</option>
-            <option value="devi">devi</option>
-            <option value="eli">eli</option>
-            <option value="demo">demo</option>
-          </select>
-          <span class="user-dot" id="simUserDot" title="No sim user">–</span>
-        </div>
-        <div class="auth-links">
+        <div class="user-panel">
           {% if user.is_authenticated %}
-            <a href="/logout/">Logout</a>
+            {% with user.get_full_name|default:user.get_username as display_name %}
+            <div class="user-chip">
+              <span class="user-avatar">{{ display_name|slice:':1'|upper }}</span>
+              <span class="user-meta">
+                <span class="user-name">{{ display_name }}</span>
+                {% if project_membership %}
+                  <span class="user-role">{{ project_membership.get_role_display }}</span>
+                {% else %}
+                  <span class="user-role">Signed in</span>
+                {% endif %}
+              </span>
+              <form method="post" action="{% url 'logout' %}" class="logout-form">
+                {% csrf_token %}
+                <button type="submit">Logout</button>
+              </form>
+            </div>
+            {% endwith %}
           {% else %}
-            <a href="/login/">Login</a>
+            <div class="auth-links">
+              <a href="{% url 'login' %}?next={{ request.path|urlencode }}">Login</a>
+              <a href="{% url 'signup' %}?next={{ request.path|urlencode }}">Sign up</a>
+            </div>
           {% endif %}
         </div>
       </div>
@@ -163,48 +181,6 @@
   {% block extra_js %}{% endblock %}
 <script>
   (function(){
-    const key='gmh_sim_user';
-    const body=document.body;
-    const serverUser=body?body.getAttribute('data-sim-user')||'':'';
-    const dot=document.getElementById('simUserDot');
-    const applyIndicators=(u)=>{
-      if(dot){
-        const display = u ? String(u).charAt(0).toUpperCase() : '–';
-        dot.textContent = display;
-        dot.setAttribute('title', u ? `Simulating: ${u}` : 'No sim user');
-      }
-    };
-    const setSimUser=function(u, opts){
-      try { localStorage.setItem(key, u || ''); } catch(e) {}
-      if (body) { body.setAttribute('data-sim-user', u || ''); }
-      applyIndicators(u);
-      if (opts && opts.reload) {
-        const url = new URL(window.location.href);
-        if (u) {
-          url.searchParams.set('sim_user', u);
-        } else {
-          url.searchParams.delete('sim_user');
-        }
-        window.location.href = url.toString();
-      }
-    };
-    window.__setSimUser = setSimUser;
-    let stored='';
-    try { stored = localStorage.getItem(key) || ''; } catch(e) {}
-    if (stored && stored !== serverUser) {
-      setSimUser(stored, { reload: true });
-      return;
-    }
-    const initial = serverUser || stored;
-    const sel=document.getElementById('simUserSelect');
-    if (sel) { sel.value = initial; }
-    setSimUser(initial, { reload: false });
-    if (sel) {
-      sel.addEventListener('change', (event) => {
-        setSimUser(event.target.value, { reload: true });
-      });
-    }
-
     const themeKey='gmh_theme';
     const root=document.documentElement;
     const toggle=document.getElementById('themeToggle');

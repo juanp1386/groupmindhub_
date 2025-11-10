@@ -1,13 +1,19 @@
 import json
+from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
-from groupmindhub.apps.core.models import Block, Change, Entry, Project
+from groupmindhub.apps.core.models import Block, Change, Entry, Project, ProjectMembership
 
 
 class ChangeApiTests(TestCase):
     def setUp(self):
         self.client = Client()
         self.project = Project.objects.create(name='API Project')
-        self.entry = Entry.objects.create(project=self.project, title='API Entry')
+        User = get_user_model()
+        self.user = User.objects.create_user('editor', password='test-pass-123')
+        self.viewer = User.objects.create_user('viewer', password='test-pass-123')
+        self.entry = Entry.objects.create(project=self.project, title='API Entry', author=self.user)
+        ProjectMembership.objects.create(project=self.project, user=self.user, role=ProjectMembership.Role.EDITOR)
+        ProjectMembership.objects.create(project=self.project, user=self.viewer, role=ProjectMembership.Role.VIEWER)
         Block.objects.create(
             entry=self.entry,
             stable_id='h_root',
@@ -24,6 +30,7 @@ class ChangeApiTests(TestCase):
             parent_stable_id='h_root',
             position=2,
         )
+        self.client.force_login(self.user)
 
     def test_insert_subsection_allows_new_child_body(self):
         payload = {
@@ -54,7 +61,6 @@ class ChangeApiTests(TestCase):
             ],
             'affected_blocks': ['h_child', 'p_child'],
             'anchors': ['after:p_root', 'after:h_child'],
-            'sim_user': 'ana',
         }
 
         response = self.client.post(
@@ -67,3 +73,44 @@ class ChangeApiTests(TestCase):
         change = Change.objects.get(project=self.project)
         self.assertEqual(change.summary, 'Add subsection')
         self.assertEqual(len(change.ops_json), 2)
+
+    def test_viewer_cannot_create_change(self):
+        self.client.force_login(self.viewer)
+        payload = {
+            'entry_id': self.entry.id,
+            'section_id': 'root',
+            'summary': 'Should fail',
+            'ops_json': [],
+            'affected_blocks': [],
+            'anchors': [],
+        }
+        response = self.client.post(
+            f'/api/projects/{self.project.id}/changes/create',
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_member_cannot_vote(self):
+        change = Change.objects.create(
+            project=self.project,
+            target_entry=self.entry,
+            author=self.user,
+            summary='Update section',
+            ops_json=[],
+            affected_blocks=[],
+            before_outline='',
+            after_outline='',
+            target_section_id='root',
+            status='published',
+            base_entry_version_int=1,
+        )
+        User = get_user_model()
+        outsider = User.objects.create_user('outsider', password='test-pass-123')
+        self.client.force_login(outsider)
+        response = self.client.post(
+            f'/api/changes/{change.id}/votes',
+            data=json.dumps({'value': 1}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)

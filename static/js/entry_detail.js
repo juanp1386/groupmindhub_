@@ -8,27 +8,13 @@
     parsedEntry = {};
   }
   const makeId = () => (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : `tmp_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`);
-  const users = [
-    { id: 'ana', name: 'Ana' },
-    { id: 'ben', name: 'Ben' },
-    { id: 'chen', name: 'Chen' },
-    { id: 'devi', name: 'Devi' },
-    { id: 'eli', name: 'Eli' },
-    { id: 'demo', name: 'Demo' },
-  ];
-  let storedSimUser = null;
-  try {
-    storedSimUser = window.localStorage ? localStorage.getItem('gmh_sim_user') : null;
-  } catch (error) {
-    storedSimUser = null;
-  }
-  let currentUserId = users[0].id;
-  if (storedSimUser) {
-    for (let i = 0; i < users.length; i += 1) {
-      if (users[i].id === storedSimUser) {
-        currentUserId = users[i].id;
-        break;
-      }
+  let currentUser = null;
+  const userJsonEl = document.getElementById('__gmh_user');
+  if (userJsonEl) {
+    try {
+      currentUser = JSON.parse(userJsonEl.textContent || '{}');
+    } catch (error) {
+      currentUser = null;
     }
   }
 
@@ -2041,7 +2027,6 @@
           anchors: payload.anchors,
           before_outline: payload.before_outline,
           after_outline: payload.after_outline,
-          sim_user: currentUserId,
         }),
       });
       clearDraft();
@@ -2059,10 +2044,7 @@
   async function loadChanges() {
     try {
       if (changeHelpEl) changeHelpEl.textContent = 'Loading changes…';
-      const stored = localStorage.getItem('gmh_sim_user');
-      const simUser = stored || currentUserId;
-      const qs = simUser ? `?sim_user=${encodeURIComponent(simUser)}` : '';
-      const data = await apiJson(`/api/projects/${entryState.projectId}/changes${qs}`);
+      const data = await apiJson(`/api/projects/${entryState.projectId}/changes`);
       changeState.list = data.changes || [];
       if (changeHelpEl) changeHelpEl.textContent = changeState.list.length ? '' : 'No candidates yet.';
       renderChanges();
@@ -2084,14 +2066,9 @@
     try {
       const current = change.current_user_vote || 0;
       const next = current === value ? 0 : value;
-      const simUser = localStorage.getItem('gmh_sim_user') || currentUserId;
-      if (!simUser) {
-        alert('Select a simulated user first.');
-        return;
-      }
       const resp = await apiJson(`/api/changes/${change.id}/votes`, {
         method: 'POST',
-        body: JSON.stringify({ value: next, sim_user: simUser }),
+        body: JSON.stringify({ value: next }),
       });
       Object.assign(change, resp.change);
       // If auto-merge fired, refresh entry + changes to avoid stale base
@@ -2106,11 +2083,6 @@
 
   async function manualMerge(change) {
     try {
-      const simUser = localStorage.getItem('gmh_sim_user') || currentUserId;
-      if (!simUser) {
-        alert('Select a simulated user first.');
-        return;
-      }
       if (change && typeof change.is_passing === 'boolean' && !change.is_passing) {
         const requiredYes = change.required_yes_votes || 0;
         alert(requiredYes
@@ -2118,7 +2090,7 @@
           : 'This change has not met the merge threshold yet.');
         return;
       }
-      const resp = await apiJson(`/api/changes/${change.id}/merge?sim_user=${encodeURIComponent(simUser)}`, { method: 'POST' });
+      const resp = await apiJson(`/api/changes/${change.id}/merge`, { method: 'POST' });
       Object.assign(change, resp.change);
       await refreshEntry();
       renderChanges();
@@ -2145,35 +2117,6 @@
       }
     } catch (error) {
       console.error(error);
-    }
-  }
-
-  function renderUsers() {
-    const select = document.getElementById('userSelect');
-    select.innerHTML = '';
-    users.forEach((user) => {
-      const option = document.createElement('option');
-      option.value = user.id;
-      option.textContent = user.name;
-      if (user.id === currentUserId) option.selected = true;
-      select.appendChild(option);
-    });
-    select.addEventListener('change', () => {
-      currentUserId = select.value;
-      localStorage.setItem('gmh_sim_user', currentUserId);
-      loadChanges();
-      updateUserDot();
-    });
-    localStorage.setItem('gmh_sim_user', currentUserId);
-    updateUserDot();
-  }
-
-  function updateUserDot() {
-    const user = users.find((u) => u.id === currentUserId);
-    const dot = document.getElementById('userDot');
-    if (user && dot) {
-      dot.textContent = user.name[0];
-      dot.title = `Current user: ${user.name}`;
     }
   }
 
@@ -2204,7 +2147,6 @@
     }
   })();
 
-  renderUsers();
   renderEntry();
   renderComposer();
   loadChanges();

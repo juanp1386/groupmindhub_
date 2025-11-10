@@ -9,7 +9,6 @@
   </header>
   <form method="post" id="projectForm" class="project-form">{% csrf_token %}
     <input type="hidden" name="sections_json" id="sectionsJson" />
-    <input type="hidden" name="sim_user" id="simUserHidden" />
     <section class="project-card">
       <div class="field">
         <label for="projectName">Project name</label>
@@ -40,12 +39,6 @@
 </section>
 <script>
 (function(){
-  const key='gmh_sim_user';
-  let storedSim='';
-  try { storedSim = localStorage.getItem(key) || ''; } catch(e) { storedSim=''; }
-  const simHidden=document.getElementById('simUserHidden');
-  if(simHidden){ simHidden.value = storedSim; }
-
   const container=document.getElementById('sectionsContainer');
   const addRootButtons=Array.from(document.querySelectorAll('[data-add-root]'));
   if(!container){ console.warn('Section builder init skipped (elements missing)'); return; }

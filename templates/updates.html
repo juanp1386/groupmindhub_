@@ -152,7 +152,6 @@
   const form=document.getElementById('updatesFilters');
   if(!form){return;}
   const searchParams=new URLSearchParams(window.location.search||'');
-  searchParams.delete('sim_user');
   const hasQuery=Array.from(searchParams.keys()).length>0;
   const persistFilters=()=>{
     const data=new FormData(form);

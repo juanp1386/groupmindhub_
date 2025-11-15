@@ -1,6 +1,6 @@
 from __future__ import annotations
 from django.conf import settings
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
 
 
@@ -301,3 +301,58 @@ class ProjectInvite(models.Model):
         if not self.token:
             self.token = self.generate_token()
         super().save(*args, **kwargs)
+
+
+class Comment(models.Model):
+    project = models.ForeignKey(Project, related_name='comments', on_delete=models.CASCADE)
+    section = models.ForeignKey('Section', related_name='comments', null=True, blank=True, on_delete=models.CASCADE)
+    change = models.ForeignKey('Change', related_name='comments', null=True, blank=True, on_delete=models.CASCADE)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name='comments',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        indexes = [
+            models.Index(fields=['project', 'created_at']),
+            models.Index(fields=['section', 'created_at']),
+            models.Index(fields=['change', 'created_at']),
+        ]
+
+    def __str__(self):
+        target = 'section' if self.section_id else 'change'
+        target_id = self.section.stable_id if self.section_id else self.change_id
+        return f"Comment({target}={target_id}, author={self.author_id})"
+
+    def clean(self):
+        if not self.section_id and not self.change_id:
+            raise ValidationError('A comment must target a section or a change.')
+        if self.section_id and self.change_id:
+            raise ValidationError('A comment may target only one object.')
+
+    def save(self, *args, **kwargs):
+        if self.section_id and not self.project_id:
+            self.project = self.section.entry.project
+        if self.change_id and not self.project_id:
+            self.project = self.change.project
+        self.full_clean(exclude={'project'})
+        super().save(*args, **kwargs)
+
+    @property
+    def target_type(self) -> str:
+        return 'change' if self.change_id else 'section'
+
+    @property
+    def target_identifier(self):
+        if self.change_id:
+            return self.change_id
+        if self.section_id:
+            return self.section.stable_id
+        return None

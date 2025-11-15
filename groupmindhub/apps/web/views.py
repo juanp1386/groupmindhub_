@@ -17,6 +17,7 @@ from groupmindhub.apps.core.models import (
     EntryHistory,
     ProjectMembership,
     ProjectInvite,
+    Comment,
 )
 from groupmindhub.apps.core.api import serialize_entry
 from django.http import HttpResponse, HttpResponseForbidden
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from .forms import ProjectInviteForm
 from groupmindhub.apps.core.access import resolve_invite, forget_invite
+from django.utils.text import Truncator
 
 
 def index(request):
@@ -361,6 +363,8 @@ def entry_detail(request, entry_id: int):
         'initial': (display_name or request.user.get_username() or '?')[:1].upper(),
         'role': membership.role if membership else None,
         'role_label': membership.get_role_display() if membership else None,
+        'can_comment': bool(membership),
+        'can_moderate': bool(membership and membership.has_at_least(ProjectMembership.Role.EDITOR)),
     }
 
     return render(request, 'entry_detail.html', {
@@ -484,6 +488,44 @@ def updates(request):
                 'timestamp': record.created_at,
                 'link': link,
             })
+
+        comment_qs = Comment.objects.select_related(
+            'project',
+            'author',
+            'section__entry__project',
+            'change__project',
+            'change__target_entry',
+        ).order_by('-created_at')[:25]
+        for comment in comment_qs:
+            project_name = comment.project.name if comment.project_id else 'Project'
+            if comment.section_id:
+                section = comment.section
+                section_label = section.heading
+                link = f"/entries/{section.entry_id}/?focus={section.stable_id}"
+            elif comment.change_id:
+                change = comment.change
+                if not change:
+                    continue
+                section_label = _section_label_for_change(change)
+                link = f"/entries/{change.target_entry_id}/?focus={change.target_section_id or ''}&proposal={change.id}"
+            else:
+                continue
+            if not matches_filters(project_name, section_label):
+                continue
+            author = 'Anonymous'
+            if comment.author_id and comment.author:
+                author = comment.author.get_full_name() or comment.author.get_username() or 'Anonymous'
+            preview = Truncator(comment.body).chars(60)
+            followed_activity.append({
+                'project': project_name,
+                'section': section_label,
+                'summary': f"💬 {author}: {preview}",
+                'timestamp': comment.created_at,
+                'link': link,
+            })
+
+        followed_activity.sort(key=lambda item: item['timestamp'], reverse=True)
+        followed_activity = followed_activity[:25]
 
     context = {
         'open_votings': open_votings,

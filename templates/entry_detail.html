@@ -131,6 +131,21 @@
     .candidate-pane .card{height:50%;min-height:260px}
     .candidate-pane .card + .card{border-top:1px solid var(--border)}
     .candidate-pane .card .bd{padding:18px 20px;overflow:auto}
+    .comments-card .bd{display:flex;flex-direction:column;gap:14px;padding:18px 20px;overflow:hidden}
+    .comment-target{font-size:12px;color:var(--muted)}
+    .comment-list{display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 420px);overflow:auto;padding-right:4px}
+    .comment-item{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,0.55)}
+    [data-theme='dark'] .comment-item{background:rgba(22,38,40,0.8)}
+    .comment-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--muted);justify-content:space-between}
+    .comment-body{white-space:pre-wrap;line-height:1.5;font-size:13px}
+    .comment-actions{display:flex;gap:8px;justify-content:flex-end}
+    .comment-empty{font-size:12px;color:var(--muted);text-align:center;padding:8px;border:1px dashed rgba(var(--accent-rgb),0.3);border-radius:10px}
+    .comment-form{display:flex;flex-direction:column;gap:10px}
+    .comment-form textarea{width:100%;min-height:90px;resize:vertical}
+    .comment-form[aria-disabled='true'] textarea{opacity:0.6;cursor:not-allowed}
+    .comment-form-actions{display:flex;justify-content:flex-end}
+    .comment-load-more{align-self:center}
+    .comment-guest-note{font-size:12px;color:var(--muted);text-align:center}
     .candidate-list,.queue-list{display:flex;flex-direction:column;gap:12px}
     .candidate-card{background:rgba(255,255,255,0.55);border:1px solid rgba(var(--accent-rgb),0.25);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 12px 24px rgba(0,0,0,0.08)}
     [data-theme='dark'] .candidate-card{background:rgba(22,38,40,0.85);border-color:rgba(255,255,255,0.12)}
@@ -453,6 +468,31 @@
             <div class="empty-state" id="historyEmpty" role="note">No history for this section yet.</div>
           </div>
         </section>
+        <section class="card comments-card">
+          <div class="hd">
+            <div>
+              <div class="pane-title">Discussion</div>
+              <div class="help" id="commentTargetLabel">Select a section to view comments.</div>
+            </div>
+            <div class="pane-controls">
+              <button class="ghost" type="button" id="commentScopeReset" hidden>Section discussion</button>
+              <button class="ghost" type="button" id="commentRefreshBtn">Refresh</button>
+            </div>
+          </div>
+          <div class="bd">
+            <div id="commentList" class="comment-list" role="list"></div>
+            <button type="button" class="ghost comment-load-more" id="commentLoadMore" hidden>Load older</button>
+            <div class="comment-empty" id="commentEmpty" role="note">No comments yet. Be the first to share feedback.</div>
+            <form id="commentForm" class="comment-form" data-has-membership="{% if project_membership %}1{% else %}0{% endif %}" aria-disabled="{% if project_membership %}false{% else %}true{% endif %}">
+              <label class="sr-only" for="commentBody">New comment</label>
+              <textarea id="commentBody" placeholder="Share feedback for this section" {% if not project_membership %}disabled{% endif %}></textarea>
+              <div class="comment-form-actions">
+                <button type="submit" class="primary" id="commentSubmitBtn">Post comment</button>
+              </div>
+            </form>
+            <div class="comment-guest-note" id="commentGuestNote" {% if project_membership %}hidden{% endif %}>You need a project membership to participate in discussions.</div>
+          </div>
+        </section>
       </div>
       <div class="workspace-gutter" data-between="editor" tabindex="0" role="separator" aria-orientation="vertical" aria-label="Resize candidate and editor panes"></div>
       <div class="workspace-pane" data-pane="editor" data-pane-key="editor">
@@ -545,7 +585,7 @@
     })();
   </script>
 
-  <script src="{% static 'js/entry_detail.js' %}?v=20240918"></script>
+  <script src="{% static 'js/entry_detail.js' %}?v=20240919"></script>
 
 
   

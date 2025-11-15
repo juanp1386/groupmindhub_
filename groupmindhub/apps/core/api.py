@@ -4,14 +4,58 @@ import math
 from typing import Dict, Any
 import uuid
 from django.http import JsonResponse, HttpRequest
+from django.core.paginator import Paginator
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Project, Entry, Change, Vote, Block, ProjectMembership
+from .models import Project, Entry, Change, Vote, Block, ProjectMembership, Comment, Section
 from .access import resolve_invite
 
 ROOT_SECTION_ID = '__root__'
+DEFAULT_COMMENT_PAGE_SIZE = 20
+
+
+def _resolve_comment_target(project: Project, target_type: str, identifier):
+    if target_type == 'section':
+        if identifier in (None, ''):
+            return None
+        section = Section.objects.filter(entry__project=project, stable_id=str(identifier)).first()
+        return section
+    if target_type == 'change':
+        if not identifier:
+            return None
+        try:
+            change_id = int(identifier)
+        except (TypeError, ValueError):
+            return None
+        return Change.objects.filter(project=project, id=change_id).first()
+    return None
+
+
+def serialize_comment(comment: Comment, user=None, membership: ProjectMembership | None = None):
+    author_name = 'Anonymous'
+    if comment.author_id and comment.author:
+        author_name = comment.author.get_full_name() or comment.author.get_username() or f"User {comment.author_id}"
+    target_type = 'change' if comment.change_id else 'section'
+    target_id = comment.change_id if comment.change_id else (comment.section.stable_id if comment.section_id else None)
+    can_delete = False
+    if user and getattr(user, 'is_authenticated', False):
+        if comment.author_id == user.id:
+            can_delete = True
+        elif membership and membership.has_at_least(ProjectMembership.Role.EDITOR):
+            can_delete = True
+    return {
+        'id': comment.id,
+        'author_id': comment.author_id,
+        'author_name': author_name,
+        'body': comment.body,
+        'created_at': comment.created_at.isoformat(),
+        'updated_at': comment.updated_at.isoformat(),
+        'target_type': target_type,
+        'target_id': target_id,
+        'can_delete': can_delete,
+    }
 
 
 def _membership_or_error(request: HttpRequest, project: Project, role: str):
@@ -408,6 +452,104 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
     )
     auto_merge()
     return JsonResponse({'change': serialize_change(patch, request.user, section_index=section_index)}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def api_project_comments(request: HttpRequest, project_id: int):
+    project = get_object_or_404(Project, id=project_id)
+    membership, error = _membership_or_error(request, project, ProjectMembership.Role.VIEWER)
+    if error:
+        return error
+    if request.method == 'GET':
+        target_type = (request.GET.get('target_type') or '').strip().lower()
+        if target_type not in {'section', 'change'}:
+            return JsonResponse({'error': 'target_type must be section or change'}, status=400)
+        identifier = (
+            request.GET.get('section_id')
+            or request.GET.get('change_id')
+            or request.GET.get('target_id')
+        )
+        target = _resolve_comment_target(project, target_type, identifier)
+        if not target:
+            return JsonResponse({'error': 'target not found'}, status=404)
+        queryset = Comment.objects.filter(project=project)
+        if target_type == 'section':
+            queryset = queryset.filter(section=target)
+            identifier = target.stable_id
+        else:
+            queryset = queryset.filter(change=target)
+            identifier = str(target.id)
+        queryset = queryset.select_related('author', 'section__entry', 'change').order_by('-created_at', '-id')
+        try:
+            page_number = int(request.GET.get('page', 1))
+        except (TypeError, ValueError):
+            page_number = 1
+        try:
+            page_size = int(request.GET.get('page_size', DEFAULT_COMMENT_PAGE_SIZE))
+        except (TypeError, ValueError):
+            page_size = DEFAULT_COMMENT_PAGE_SIZE
+        page_size = max(1, min(page_size, 100))
+        paginator = Paginator(queryset, page_size)
+        page = paginator.get_page(page_number)
+        results = [serialize_comment(comment, request.user, membership) for comment in page.object_list]
+        return JsonResponse(
+            {
+                'results': results,
+                'page': page.number,
+                'page_size': page.paginator.per_page,
+                'has_next': page.has_next(),
+                'total': paginator.count,
+                'target_type': target_type,
+                'target_id': identifier,
+            }
+        )
+
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'auth required'}, status=401)
+    if not membership:
+        return JsonResponse({'error': 'membership required'}, status=403)
+    try:
+        data = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'invalid json'}, status=400)
+    target_type = (data.get('target_type') or '').strip().lower()
+    if target_type not in {'section', 'change'}:
+        return JsonResponse({'error': 'target_type must be section or change'}, status=400)
+    identifier = data.get('section_id') or data.get('change_id') or data.get('target_id')
+    target = _resolve_comment_target(project, target_type, identifier)
+    if not target:
+        return JsonResponse({'error': 'target not found'}, status=404)
+    body = (data.get('body') or '').strip()
+    if not body:
+        return JsonResponse({'error': 'body is required'}, status=400)
+    if target_type == 'section':
+        comment = Comment.objects.create(project=project, section=target, author=request.user, body=body)
+    else:
+        comment = Comment.objects.create(project=project, change=target, author=request.user, body=body)
+    serialized = serialize_comment(comment, request.user, membership)
+    return JsonResponse({'comment': serialized}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def api_project_comment_delete(request: HttpRequest, project_id: int, comment_id: int):
+    project = get_object_or_404(Project, id=project_id)
+    membership, error = _membership_or_error(request, project, ProjectMembership.Role.VIEWER)
+    if error:
+        return error
+    comment = get_object_or_404(
+        Comment.objects.select_related('author'),
+        id=comment_id,
+        project=project,
+    )
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'auth required'}, status=401)
+    if comment.author_id != request.user.id:
+        if not membership or not membership.has_at_least(ProjectMembership.Role.EDITOR):
+            return JsonResponse({'error': 'forbidden'}, status=403)
+    comment.delete()
+    return JsonResponse({'deleted': True})
 
 
 @csrf_exempt

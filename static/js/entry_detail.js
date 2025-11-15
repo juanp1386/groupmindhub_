@@ -76,6 +76,16 @@
   const queueListEl = document.getElementById('waitingQueueList');
   const queueEmptyEl = document.getElementById('waitingQueueEmpty');
   const changeHelpEl = document.getElementById('changeHelp');
+  const commentListEl = document.getElementById('commentList');
+  const commentEmptyEl = document.getElementById('commentEmpty');
+  const commentLoadMoreBtn = document.getElementById('commentLoadMore');
+  const commentRefreshBtn = document.getElementById('commentRefreshBtn');
+  const commentScopeResetBtn = document.getElementById('commentScopeReset');
+  const commentTargetLabel = document.getElementById('commentTargetLabel');
+  const commentForm = document.getElementById('commentForm');
+  const commentTextarea = document.getElementById('commentBody');
+  const commentSubmitBtn = document.getElementById('commentSubmitBtn');
+  const commentGuestNote = document.getElementById('commentGuestNote');
   const liveChecksChip = document.getElementById('liveChecksChip');
   const paneMaxButtons = Array.from(document.querySelectorAll('[data-pane-max]'));
   const outlineModeButtons = Array.from(document.querySelectorAll('[data-outline-mode]'));
@@ -111,7 +121,21 @@
     dropTargetId: null,
     dropPosition: null,
   };
+  const commentState = {
+    targetType: null,
+    targetId: null,
+    targetLabel: '',
+    items: [],
+    page: 1,
+    hasNext: false,
+    loading: false,
+    followSectionFocus: true,
+    refreshHandle: null,
+  };
+  const COMMENT_PAGE_SIZE = 10;
   let timerInterval = null;
+  const canComment = !!(currentUser && currentUser.can_comment);
+  const canModerate = !!(currentUser && currentUser.can_moderate);
 
   function loadWorkspaceLayout() {
     try {
@@ -195,6 +219,320 @@
     } catch (error) {
       console.warn('[GMH] Failed to persist outline state', error);
     }
+  }
+
+  function clearCommentRefresh() {
+    if (commentState.refreshHandle) {
+      window.clearInterval(commentState.refreshHandle);
+      commentState.refreshHandle = null;
+    }
+  }
+
+  function scheduleCommentRefresh() {
+    clearCommentRefresh();
+    if (!commentState.targetId) return;
+    commentState.refreshHandle = window.setInterval(() => {
+      refreshComments();
+    }, 30000);
+  }
+
+  function formatCommentTimestamp(iso) {
+    if (!iso) return '';
+    try {
+      const date = new Date(iso);
+      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    } catch (error) {
+      try {
+        return new Date(iso).toLocaleString();
+      } catch (err) {
+        return iso;
+      }
+    }
+  }
+
+  function updateCommentHeader() {
+    if (commentTargetLabel) {
+      commentTargetLabel.textContent = commentState.targetLabel || 'Select a section to view comments.';
+    }
+    if (commentScopeResetBtn) {
+      commentScopeResetBtn.hidden = commentState.targetType !== 'change';
+    }
+    if (commentLoadMoreBtn) {
+      commentLoadMoreBtn.hidden = !commentState.hasNext;
+    }
+  }
+
+  function updateCommentFormAvailability() {
+    if (!commentForm) return;
+    const hasTarget = Boolean(commentState.targetId);
+    const allow = canComment && hasTarget;
+    commentForm.setAttribute('aria-disabled', allow ? 'false' : 'true');
+    if (commentTextarea) commentTextarea.disabled = !allow;
+    if (commentSubmitBtn) commentSubmitBtn.disabled = !allow;
+    if (commentGuestNote) commentGuestNote.hidden = canComment;
+  }
+
+  function clearCommentTarget(message) {
+    commentState.targetType = null;
+    commentState.targetId = null;
+    commentState.targetLabel = message || 'Select a section to view comments.';
+    commentState.items = [];
+    commentState.page = 1;
+    commentState.hasNext = false;
+    commentState.followSectionFocus = true;
+    clearCommentRefresh();
+    renderComments();
+    updateCommentHeader();
+    updateCommentFormAvailability();
+  }
+
+  function buildCommentNode(comment) {
+    const node = document.createElement('article');
+    node.className = 'comment-item';
+    node.setAttribute('role', 'listitem');
+    const metaRow = document.createElement('div');
+    metaRow.className = 'comment-meta';
+    const authorSpan = document.createElement('span');
+    authorSpan.textContent = comment.author_name || 'Anonymous';
+    const timeSpan = document.createElement('span');
+    timeSpan.textContent = formatCommentTimestamp(comment.created_at);
+    metaRow.appendChild(authorSpan);
+    metaRow.appendChild(timeSpan);
+    node.appendChild(metaRow);
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'comment-body';
+    bodyEl.innerHTML = escapeHtml(comment.body || '').replace(/\n/g, '<br />');
+    node.appendChild(bodyEl);
+    if (comment.can_delete || canModerate) {
+      const actions = document.createElement('div');
+      actions.className = 'comment-actions';
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'ghost';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => deleteComment(comment.id));
+      actions.appendChild(deleteBtn);
+      node.appendChild(actions);
+    }
+    return node;
+  }
+
+  function renderComments() {
+    if (!commentListEl || !commentEmptyEl) return;
+    commentListEl.innerHTML = '';
+    const items = commentState.items.slice().reverse();
+    items.forEach((comment) => {
+      commentListEl.appendChild(buildCommentNode(comment));
+    });
+    if (items.length) {
+      commentEmptyEl.style.display = 'none';
+    } else {
+      commentEmptyEl.style.display = '';
+    }
+    updateCommentHeader();
+    updateCommentFormAvailability();
+  }
+
+  async function fetchComments(page) {
+    const params = new URLSearchParams({
+      target_type: commentState.targetType || '',
+      page: String(page || 1),
+      page_size: String(COMMENT_PAGE_SIZE),
+    });
+    if (commentState.targetType === 'section') {
+      params.set('section_id', commentState.targetId || '');
+    } else if (commentState.targetType === 'change') {
+      params.set('change_id', commentState.targetId || '');
+    }
+    return apiJson(`/api/projects/${entryState.projectId}/comments?${params.toString()}`);
+  }
+
+  async function loadComments(reset = false) {
+    if (!commentState.targetId || !commentState.targetType) {
+      clearCommentTarget();
+      return;
+    }
+    if (commentState.loading) return;
+    commentState.loading = true;
+    const page = reset ? 1 : commentState.page;
+    try {
+      const data = await fetchComments(page);
+      const results = Array.isArray(data.results) ? data.results : [];
+      if (reset || page === 1) {
+        commentState.items = results;
+        commentState.page = 1;
+      } else {
+        commentState.items = commentState.items.concat(results);
+        commentState.page = page;
+      }
+      commentState.hasNext = Boolean(data.has_next);
+      renderComments();
+      scheduleCommentRefresh();
+    } catch (error) {
+      console.error('[GMH] Failed to load comments', error);
+      if (commentTargetLabel) {
+        commentTargetLabel.textContent = 'Unable to load comments right now.';
+      }
+    } finally {
+      commentState.loading = false;
+    }
+  }
+
+  async function loadMoreComments() {
+    if (!commentState.hasNext || commentState.loading) return;
+    const nextPage = commentState.page + 1;
+    commentState.loading = true;
+    try {
+      const data = await fetchComments(nextPage);
+      const results = Array.isArray(data.results) ? data.results : [];
+      commentState.items = commentState.items.concat(results);
+      commentState.page = nextPage;
+      commentState.hasNext = Boolean(data.has_next);
+      renderComments();
+    } catch (error) {
+      console.error('[GMH] Failed to load older comments', error);
+    } finally {
+      commentState.loading = false;
+    }
+  }
+
+  async function refreshComments() {
+    if (!commentState.targetId || !commentState.targetType) return;
+    try {
+      const data = await fetchComments(1);
+      const results = Array.isArray(data.results) ? data.results : [];
+      const existingIds = new Set(commentState.items.map((item) => item.id));
+      let changed = false;
+      for (let idx = results.length - 1; idx >= 0; idx -= 1) {
+        const incoming = results[idx];
+        if (!existingIds.has(incoming.id)) {
+          commentState.items.unshift(incoming);
+          changed = true;
+        } else {
+          const existingIndex = commentState.items.findIndex((item) => item.id === incoming.id);
+          if (existingIndex !== -1) {
+            commentState.items[existingIndex] = incoming;
+          }
+        }
+      }
+      commentState.hasNext = Boolean(data.has_next);
+      if (changed) {
+        renderComments();
+      } else {
+        updateCommentHeader();
+      }
+    } catch (error) {
+      console.error('[GMH] Failed to refresh comments', error);
+    }
+  }
+
+  async function deleteComment(commentId) {
+    if (!commentId) return;
+    if (!window.confirm('Delete this comment?')) return;
+    try {
+      await apiJson(`/api/projects/${entryState.projectId}/comments/${commentId}`, { method: 'DELETE' });
+      commentState.items = commentState.items.filter((item) => item.id !== commentId);
+      renderComments();
+    } catch (error) {
+      alert('Failed to delete comment.');
+      console.error('[GMH] Delete comment failed', error);
+    }
+  }
+
+  async function submitComment(event) {
+    if (event) event.preventDefault();
+    if (!canComment) {
+      alert('You need a project membership to comment.');
+      return;
+    }
+    if (!commentState.targetId || !commentState.targetType) {
+      alert('Select a section or proposal to comment on.');
+      return;
+    }
+    if (!commentTextarea) return;
+    const body = commentTextarea.value.trim();
+    if (!body) {
+      alert('Please enter a comment before submitting.');
+      return;
+    }
+    if (commentSubmitBtn) commentSubmitBtn.disabled = true;
+    try {
+      const payload = {
+        target_type: commentState.targetType,
+        body,
+      };
+      if (commentState.targetType === 'section') {
+        payload.section_id = commentState.targetId;
+      } else if (commentState.targetType === 'change') {
+        payload.change_id = commentState.targetId;
+      }
+      const resp = await apiJson(`/api/projects/${entryState.projectId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (resp && resp.comment) {
+        commentState.items.unshift(resp.comment);
+        renderComments();
+        commentTextarea.value = '';
+        scheduleCommentRefresh();
+      }
+    } catch (error) {
+      alert('Failed to post comment.');
+      console.error('[GMH] Comment submission failed', error);
+    } finally {
+      if (commentSubmitBtn) commentSubmitBtn.disabled = false;
+    }
+  }
+
+  function setCommentTarget(target, options = {}) {
+    if (!target || !target.id) {
+      clearCommentTarget();
+      return;
+    }
+    if (typeof options.followFocus === 'boolean') {
+      commentState.followSectionFocus = options.followFocus;
+    }
+    const targetId = String(target.id);
+    const sameTarget = commentState.targetType === target.type && commentState.targetId === targetId;
+    commentState.targetType = target.type;
+    commentState.targetId = targetId;
+    commentState.targetLabel = target.label || '';
+    if (!sameTarget || options.force) {
+      commentState.items = [];
+      commentState.page = 1;
+      commentState.hasNext = false;
+      renderComments();
+      loadComments(true);
+    } else {
+      updateCommentHeader();
+      updateCommentFormAvailability();
+    }
+  }
+
+  function syncCommentTargetWithSection(options = {}) {
+    const sectionId = workspaceState.focusedSectionId;
+    if (!sectionId || isVirtualSectionId(sectionId)) {
+      clearCommentTarget('Comments are available for published sections.');
+      return;
+    }
+    if (!options.force && !commentState.followSectionFocus) {
+      return;
+    }
+    const meta = sectionLookup.get(sectionId) || {};
+    const heading = meta.heading || '(untitled section)';
+    const numbering = meta.numbering ? `${meta.numbering} ` : '';
+    setCommentTarget({
+      type: 'section',
+      id: sectionId,
+      label: `Section ${numbering}${heading}`.trim(),
+    }, { followFocus: true, force: true });
+  }
+
+  function viewChangeDiscussion(change) {
+    if (!change || !change.id) return;
+    const summary = change.summary || 'Proposal';
+    const label = `Proposal #${change.id} · ${summary}`;
+    setCommentTarget({ type: 'change', id: change.id, label }, { followFocus: false, force: true });
   }
 
   function collectOutlineIds(nodes) {
@@ -996,12 +1334,14 @@
     if (workspaceState.focusedSectionId === sectionId) {
       highlightFocusedSection();
       renderCandidatePane();
+      syncCommentTargetWithSection();
       return;
     }
     workspaceState.focusedSectionId = sectionId;
     persistWorkspaceLayout();
     highlightFocusedSection();
     renderCandidatePane();
+    syncCommentTargetWithSection();
   }
 
   function highlightFocusedSection() {
@@ -1268,6 +1608,7 @@
         <button data-act="vote-up" data-id="${change.id}">Upvote</button>
         <button data-act="vote-down" data-id="${change.id}">Downvote</button>
         <button data-act="diff" data-id="${change.id}">Diff</button>
+        <button data-act="comments" data-id="${change.id}">Discuss</button>
         <button data-act="max" data-id="${change.id}">Maximize</button>
         <span class="mini muted">${approvalPct}% support</span>
       </div>
@@ -1292,6 +1633,10 @@
     const maxButton = card.querySelector('[data-act="max"]');
     if (maxButton) {
       maxButton.addEventListener('click', () => setMaximized('candidates'));
+    }
+    const commentButton = card.querySelector('[data-act="comments"]');
+    if (commentButton) {
+      commentButton.addEventListener('click', () => viewChangeDiscussion(change));
     }
     card.dataset.placement = placement;
     return card;
@@ -1320,10 +1665,15 @@
         </div>
         <div class="row" style="gap:8px;">
           <button data-act="queue-down" data-id="${change.id}">Downvote</button>
+          <button data-act="queue-comments" data-id="${change.id}">Discuss</button>
         </div>
       </div>
     `;
     card.querySelector('[data-act="queue-down"]').addEventListener('click', () => vote(change, -1));
+    const discussBtn = card.querySelector('[data-act="queue-comments"]');
+    if (discussBtn) {
+      discussBtn.addEventListener('click', () => viewChangeDiscussion(change));
+    }
     return card;
   }
 
@@ -1750,6 +2100,11 @@
     updateSectionStatusChips();
     refreshRootIndicators();
     renderCandidatePane();
+    if (!commentState.targetType) {
+      syncCommentTargetWithSection({ force: true });
+    } else {
+      syncCommentTargetWithSection();
+    }
     const titleEl = document.getElementById('entryTitle');
     if (titleEl) {
       const titleText = entryState.title && entryState.title.trim() ? entryState.title : 'Untitled entry';
@@ -2640,6 +2995,28 @@
   const saveDraftBtn = document.getElementById('btnSaveDraft');
   if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveDraftSnapshot);
 
+  if (commentForm) {
+    commentForm.addEventListener('submit', submitComment);
+  }
+  if (commentLoadMoreBtn) {
+    commentLoadMoreBtn.addEventListener('click', () => {
+      loadMoreComments();
+    });
+  }
+  if (commentRefreshBtn) {
+    commentRefreshBtn.addEventListener('click', () => {
+      refreshComments();
+    });
+  }
+  if (commentScopeResetBtn) {
+    commentScopeResetBtn.addEventListener('click', () => {
+      commentState.followSectionFocus = true;
+      syncCommentTargetWithSection({ force: true });
+    });
+  }
+  updateCommentFormAvailability();
+  renderComments();
+
   (function initLiveChecks(){
     if (!liveChecksChip) return;
     try {
@@ -2657,5 +3034,6 @@
   renderEntry();
   renderComposer();
   loadChanges();
+  window.addEventListener('beforeunload', clearCommentRefresh);
 })();
-  
+

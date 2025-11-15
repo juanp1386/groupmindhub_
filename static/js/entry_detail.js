@@ -78,6 +78,9 @@
   const changeHelpEl = document.getElementById('changeHelp');
   const liveChecksChip = document.getElementById('liveChecksChip');
   const paneMaxButtons = Array.from(document.querySelectorAll('[data-pane-max]'));
+  const outlineModeButtons = Array.from(document.querySelectorAll('[data-outline-mode]'));
+  const outlineSearchInput = document.getElementById('outlineSearch');
+  const outlineSearchClear = document.getElementById('outlineSearchClear');
   const layoutResetBtn = document.querySelector('[data-pane-layout-reset]');
   const anchorRow = document.getElementById('anchorRow');
   const anchorScope = document.getElementById('anchorScope');
@@ -89,6 +92,7 @@
   const WORKSPACE_FOCUS_KEY = 'gmh_workspace_focus_section';
   const WORKSPACE_TIMER_KEY = 'gmh_workspace_timer_map';
   const DRAFT_STORAGE_KEY = 'gmh_saved_draft';
+  const OUTLINE_STATE_KEY = 'gmh_outline_state_v1';
   const workspaceState = {
     focusedSectionId: null,
     paneWidths: { doc: 0.38, candidates: 0.32, editor: 0.3 },
@@ -96,6 +100,16 @@
     timers: new Map(),
     pendingProposalFocus: null,
     openDiffOnFocus: false,
+  };
+  const outlineState = {
+    expanded: new Set(),
+    mode: 'expanded',
+    search: '',
+  };
+  const dragState = {
+    sectionId: null,
+    dropTargetId: null,
+    dropPosition: null,
   };
   let timerInterval = null;
 
@@ -151,6 +165,286 @@
     }
   }
 
+  function loadOutlineState() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(OUTLINE_STATE_KEY) || '{}');
+      if (stored && typeof stored === 'object') {
+        if (Array.isArray(stored.expanded)) {
+          outlineState.expanded = new Set(stored.expanded.filter((id) => typeof id === 'string' && id));
+        }
+        if (stored.mode === 'expanded' || stored.mode === 'collapsed' || stored.mode === 'custom') {
+          outlineState.mode = stored.mode;
+        }
+        if (typeof stored.search === 'string') {
+          outlineState.search = stored.search;
+        }
+      }
+    } catch (error) {
+      console.warn('[GMH] Failed to load outline state', error);
+    }
+  }
+
+  function persistOutlineState() {
+    try {
+      const payload = {
+        expanded: Array.from(outlineState.expanded),
+        mode: outlineState.mode,
+        search: outlineState.search,
+      };
+      localStorage.setItem(OUTLINE_STATE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.warn('[GMH] Failed to persist outline state', error);
+    }
+  }
+
+  function collectOutlineIds(nodes) {
+    const all = new Set();
+    const topLevel = [];
+    function visit(list, depth) {
+      list.forEach((node) => {
+        if (!node || !node.id) return;
+        all.add(node.id);
+        if (depth === 1) topLevel.push(node.id);
+        if (Array.isArray(node.children) && node.children.length) {
+          visit(node.children, depth + 1);
+        }
+      });
+    }
+    visit(Array.isArray(nodes) ? nodes : [], 1);
+    return { all, topLevel };
+  }
+
+  function ensureOutlineExpansion(nodes) {
+    const { all, topLevel } = collectOutlineIds(nodes);
+    const nextExpanded = new Set();
+    outlineState.expanded.forEach((id) => {
+      if (all.has(id)) {
+        nextExpanded.add(id);
+      }
+    });
+    outlineState.expanded = nextExpanded;
+    if (!outlineState.expanded.size) {
+      if (outlineState.mode === 'expanded') {
+        all.forEach((id) => outlineState.expanded.add(id));
+      } else if (outlineState.mode === 'collapsed') {
+        topLevel.forEach((id) => outlineState.expanded.add(id));
+      }
+    }
+  }
+
+  function computeOutlineFilter(nodes, term) {
+    const visible = new Set();
+    const matches = new Set();
+    const normalized = (term || '').toLowerCase();
+    function visit(node, ancestors) {
+      if (!node || !node.id) return false;
+      const children = Array.isArray(node.children) ? node.children : [];
+      const headingParts = [];
+      if (node.numbering) headingParts.push(String(node.numbering));
+      if (node.heading) headingParts.push(String(node.heading));
+      const headingText = headingParts.join(' ').toLowerCase();
+      const selfMatch = normalized ? headingText.includes(normalized) : false;
+      let descendantMatch = false;
+      children.forEach((child) => {
+        if (visit(child, ancestors.concat(node.id))) {
+          descendantMatch = true;
+        }
+      });
+      const isMatch = selfMatch || descendantMatch;
+      if (selfMatch) {
+        matches.add(node.id);
+      }
+      if (isMatch) {
+        visible.add(node.id);
+        ancestors.forEach((ancestorId) => visible.add(ancestorId));
+      }
+      return isMatch;
+    }
+    (Array.isArray(nodes) ? nodes : []).forEach((node) => visit(node, []));
+    return { visible, matches };
+  }
+
+  function expandAllOutline(nodes) {
+    const { all } = collectOutlineIds(nodes);
+    outlineState.expanded = new Set(all);
+    outlineState.mode = 'expanded';
+    persistOutlineState();
+  }
+
+  function collapseAllOutline(nodes) {
+    const { topLevel } = collectOutlineIds(nodes);
+    outlineState.expanded = new Set(topLevel);
+    outlineState.mode = 'collapsed';
+    persistOutlineState();
+  }
+
+  function setSectionExpanded(sectionId, expanded, nodes) {
+    if (!sectionId) return;
+    if (expanded) {
+      outlineState.expanded.add(sectionId);
+    } else {
+      outlineState.expanded.delete(sectionId);
+    }
+    if (nodes) {
+      ensureOutlineExpansion(nodes);
+    }
+    outlineState.mode = 'custom';
+    persistOutlineState();
+  }
+
+  function isSectionExpanded(sectionId) {
+    return outlineState.expanded.has(sectionId);
+  }
+
+  function updateOutlineControlsUI(nodes) {
+    if (outlineSearchInput) {
+      outlineSearchInput.value = outlineState.search || '';
+    }
+    if (outlineSearchClear) {
+      const hasValue = !!(outlineState.search && outlineState.search.trim());
+      outlineSearchClear.hidden = !hasValue;
+    }
+    const usable = Array.isArray(nodes) && nodes.length > 0;
+    outlineModeButtons.forEach((btn) => {
+      const mode = btn.getAttribute('data-outline-mode');
+      const isActive = outlineState.mode === mode && outlineState.mode !== 'custom';
+      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      btn.classList.toggle('is-active', isActive);
+      btn.disabled = !usable;
+    });
+  }
+
+  function clearDropIndicators() {
+    if (!entryContainer) return;
+    entryContainer.querySelectorAll('.section-node-drop-before, .section-node-drop-after, .section-node-drop-inside')
+      .forEach((node) => node.classList.remove('section-node-drop-before', 'section-node-drop-after', 'section-node-drop-inside'));
+  }
+
+  function updateDropIndicator(target, position) {
+    if (!target) return;
+    clearDropIndicators();
+    if (position === 'before') {
+      target.classList.add('section-node-drop-before');
+    } else if (position === 'after') {
+      target.classList.add('section-node-drop-after');
+    } else if (position === 'inside') {
+      target.classList.add('section-node-drop-inside');
+    }
+  }
+
+  function computeDropPosition(event, targetNode) {
+    if (!targetNode) return 'after';
+    const rect = targetNode.getBoundingClientRect();
+    const offset = event.clientY - rect.top;
+    if (offset < rect.height * 0.3) return 'before';
+    if (offset > rect.height * 0.7) return 'after';
+    return 'inside';
+  }
+
+  function canDropOnTarget(sectionId, targetId) {
+    if (!sectionId) return false;
+    if (!targetId) return true;
+    if (sectionId === targetId) return false;
+    const tree = getOutlineRootSections();
+    const sourcePath = findSectionPath(tree, sectionId);
+    const targetPath = findSectionPath(tree, targetId);
+    if (!sourcePath || !targetPath) return false;
+    if (targetPath.length > sourcePath.length && sourcePath.every((value, idx) => value === targetPath[idx])) {
+      return false;
+    }
+    return true;
+  }
+
+  function handleDragStart(event) {
+    const node = event.target.closest('.section-node');
+    if (!node) return;
+    const sectionId = node.getAttribute('data-section-id');
+    if (!sectionId) return;
+    if (outlineState.search && outlineState.search.trim()) {
+      event.preventDefault();
+      return;
+    }
+    dragState.sectionId = sectionId;
+    dragState.dropTargetId = null;
+    dragState.dropPosition = null;
+    node.classList.add('section-node-dragging');
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      try { event.dataTransfer.setData('text/plain', sectionId); } catch (error) {}
+    }
+  }
+
+  function handleDragEnd() {
+    if (!entryContainer) return;
+    entryContainer.querySelectorAll('.section-node-dragging').forEach((node) => {
+      node.classList.remove('section-node-dragging');
+    });
+    clearDropIndicators();
+    dragState.sectionId = null;
+    dragState.dropTargetId = null;
+    dragState.dropPosition = null;
+  }
+
+  function handleDragOver(event) {
+    if (!dragState.sectionId) return;
+    const targetNode = event.target.closest('.section-node');
+    if (!targetNode) {
+      if (entryContainer && entryContainer.contains(event.target)) {
+        event.preventDefault();
+        clearDropIndicators();
+        dragState.dropTargetId = null;
+        dragState.dropPosition = 'after';
+      } else {
+        dragState.dropTargetId = null;
+        dragState.dropPosition = null;
+        clearDropIndicators();
+      }
+      return;
+    }
+    const targetId = targetNode.getAttribute('data-section-id');
+    if (!targetId || targetId === dragState.sectionId) {
+      clearDropIndicators();
+      dragState.dropTargetId = null;
+      dragState.dropPosition = null;
+      return;
+    }
+    const position = computeDropPosition(event, targetNode);
+    if (!canDropOnTarget(dragState.sectionId, targetId)) {
+      clearDropIndicators();
+      dragState.dropTargetId = null;
+      dragState.dropPosition = null;
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    dragState.dropTargetId = targetId;
+    dragState.dropPosition = position;
+    updateDropIndicator(targetNode, position);
+  }
+
+  function handleDragLeave(event) {
+    if (!entryContainer) return;
+    if (!event.relatedTarget || !entryContainer.contains(event.relatedTarget)) {
+      clearDropIndicators();
+    }
+  }
+
+  function handleDrop(event) {
+    if (!dragState.sectionId) return;
+    event.preventDefault();
+    const sourceId = dragState.sectionId;
+    const targetId = dragState.dropTargetId;
+    const position = dragState.dropPosition || 'after';
+    handleDragEnd();
+    const moved = moveSectionWithinOutline(sourceId, targetId, position);
+    if (moved) {
+      renderEntry();
+      renderComposer();
+    }
+  }
+
   function applyPaneLayout() {
     if (!workspaceShell) return;
     const panes = workspaceShell.querySelectorAll('[data-pane]');
@@ -202,6 +496,7 @@
   }
 
   loadWorkspaceLayout();
+  loadOutlineState();
   const focusFromUrl = urlParams.get('focus');
   if (focusFromUrl) {
     workspaceState.focusedSectionId = focusFromUrl;
@@ -225,6 +520,46 @@
       }
     });
   });
+  outlineModeButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.getAttribute('data-outline-mode');
+      const tree = getOutlineRootSections();
+      if (!Array.isArray(tree) || !tree.length) return;
+      if (mode === 'expanded') {
+        expandAllOutline(tree);
+      } else if (mode === 'collapsed') {
+        collapseAllOutline(tree);
+      }
+      renderEntry();
+    });
+  });
+  if (outlineSearchInput) {
+    outlineSearchInput.addEventListener('input', (event) => {
+      outlineState.search = event.target.value || '';
+      persistOutlineState();
+      renderEntry();
+    });
+    outlineSearchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        outlineState.search = '';
+        outlineSearchInput.value = '';
+        persistOutlineState();
+        renderEntry();
+        outlineSearchInput.blur();
+      }
+    });
+  }
+  if (outlineSearchClear) {
+    outlineSearchClear.addEventListener('click', () => {
+      outlineState.search = '';
+      if (outlineSearchInput) {
+        outlineSearchInput.value = '';
+        outlineSearchInput.focus();
+      }
+      persistOutlineState();
+      renderEntry();
+    });
+  }
   if (layoutResetBtn) {
     layoutResetBtn.addEventListener('click', () => {
       resetWorkspaceLayout();
@@ -264,8 +599,15 @@
     sectionLookup.set(ROOT_SECTION_ID, getVirtualSectionMeta());
   }
 
+  function getOutlineRootSections() {
+    if (draft.active && draft.sectionId === ROOT_SECTION_ID && Array.isArray(draft.workingNodes) && draft.workingNodes.length) {
+      return draft.workingNodes;
+    }
+    return entryState.sectionsTree || [];
+  }
+
   function getTopLevelOrder() {
-    return (entryState.sectionsTree || []).map((section) => section.id);
+    return getOutlineRootSections().map((section) => section.id);
   }
 
   function defaultAnchorSectionId() {
@@ -417,6 +759,19 @@
         startNewSectionDraft({ afterSectionId: sectionId });
         return;
       }
+      const toggleBtn = event.target.closest('.section-toggle');
+      if (toggleBtn && !toggleBtn.disabled) {
+        const sectionId = toggleBtn.getAttribute('data-section-id');
+        if (sectionId) {
+          const tree = getOutlineRootSections();
+          const shouldExpand = !isSectionExpanded(sectionId);
+          setSectionExpanded(sectionId, shouldExpand, tree);
+          renderEntry();
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const rootBtn = event.target.closest('[data-root-focus]');
       if (rootBtn) {
         event.preventDefault();
@@ -430,6 +785,11 @@
         setFocusedSection(sectionId);
       }
     });
+    entryContainer.addEventListener('dragstart', handleDragStart);
+    entryContainer.addEventListener('dragend', handleDragEnd);
+    entryContainer.addEventListener('dragover', handleDragOver);
+    entryContainer.addEventListener('dragleave', handleDragLeave);
+    entryContainer.addEventListener('drop', handleDrop);
   }
 
   function recomputeNumbering(nodes, prefix = '', depth = 1, parentId = null, parentHeadingId = null, pathPrefix = []) {
@@ -483,6 +843,97 @@
     isNew: node.isNew || false,
   });
 
+  function ensureRootDraftForReorder() {
+    if (draft.active && draft.sectionId === ROOT_SECTION_ID) return;
+    draft.active = true;
+    draft.sectionId = ROOT_SECTION_ID;
+    draft.originalNodes = entryState.sectionsTree.map((section) => cloneSection(section));
+    draft.workingNodes = entryState.sectionsTree.map((section) => cloneSection(section));
+    draft.parentHeadingId = null;
+    draft.baseNumbering = '';
+    draft.baseDepth = 1;
+    draft.anchorAfterSectionId = null;
+    draft.anchorAfterBlockId = null;
+    setFocusedSection(ROOT_SECTION_ID);
+    renderComposer();
+    const summaryInput = document.getElementById('changeSummary');
+    if (summaryInput && !summaryInput.value.trim()) {
+      summaryInput.value = 'Reorder sections';
+    }
+  }
+
+  function moveSectionWithinOutline(sectionId, targetId, position) {
+    if (!sectionId) return false;
+    ensureRootDraftForReorder();
+    const tree = draft.workingNodes;
+    const sourcePath = findSectionPath(tree, sectionId);
+    if (!sourcePath) return false;
+    const sourceContext = getContextForPath(tree, sourcePath);
+    if (!sourceContext) return false;
+    const originList = sourceContext.list;
+    const originIndex = sourceContext.index;
+    const originParentId = sourceContext.node.parent_section_id || null;
+    let destinationList = tree;
+    let destinationIndex = tree.length;
+    let destinationParentId = null;
+    if (targetId) {
+      const targetPath = findSectionPath(tree, targetId);
+      if (!targetPath) return false;
+      if (targetPath.length > sourcePath.length && sourcePath.every((value, idx) => value === targetPath[idx])) {
+        return false;
+      }
+      const targetContext = getContextForPath(tree, targetPath);
+      if (!targetContext) return false;
+      const targetNode = targetContext.node;
+      const targetList = targetContext.list;
+      let targetIndex = targetContext.index;
+      if (targetList === originList && targetIndex > originIndex) {
+        targetIndex -= 1;
+      }
+      if (position === 'inside') {
+        if (!Array.isArray(targetNode.children)) targetNode.children = [];
+        destinationList = targetNode.children;
+        destinationIndex = destinationList.length;
+        destinationParentId = targetNode.id;
+      } else if (position === 'before') {
+        destinationList = targetList;
+        destinationIndex = targetIndex;
+        destinationParentId = targetNode.parent_section_id || null;
+      } else {
+        destinationList = targetList;
+        destinationIndex = targetIndex + 1;
+        destinationParentId = targetNode.parent_section_id || null;
+      }
+    } else {
+      destinationList = tree;
+      destinationIndex = position === 'before' ? 0 : tree.length;
+      destinationParentId = null;
+    }
+    let adjustedIndex = destinationIndex;
+    if (destinationList === originList && destinationIndex > originIndex) {
+      adjustedIndex -= 1;
+    }
+    if (destinationList === originList && destinationParentId === originParentId && adjustedIndex === originIndex) {
+      return false;
+    }
+    const [movingNode] = originList.splice(originIndex, 1);
+    if (!movingNode) return false;
+    if (adjustedIndex < 0) adjustedIndex = 0;
+    if (adjustedIndex > destinationList.length) adjustedIndex = destinationList.length;
+    destinationList.splice(adjustedIndex, 0, movingNode);
+    movingNode.parent_section_id = destinationParentId;
+    outlineState.mode = 'custom';
+    if (position === 'inside' && destinationParentId) {
+      outlineState.expanded.add(destinationParentId);
+    }
+    ensureOutlineExpansion(tree);
+    recomputeNumbering(tree);
+    persistOutlineState();
+    updateAnchorControls();
+    updateAnchorHighlight();
+    return true;
+  }
+
   function findSectionPath(nodes, targetId, path = []) {
     for (let i = 0; i < nodes.length; i += 1) {
       const node = nodes[i];
@@ -532,7 +983,8 @@
     if (workspaceState.focusedSectionId && (sectionLookup.has(workspaceState.focusedSectionId) || isVirtualSectionId(workspaceState.focusedSectionId))) {
       return;
     }
-    const firstSection = entryState.sectionsTree[0];
+    const outlineSections = getOutlineRootSections();
+    const firstSection = outlineSections && outlineSections.length ? outlineSections[0] : null;
     workspaceState.focusedSectionId = firstSection ? firstSection.id : ROOT_SECTION_ID;
     persistWorkspaceLayout();
   }
@@ -1155,90 +1607,144 @@
   }
 
   function renderEntry() {
+    if (!entryContainer) return;
+    const displayTree = getOutlineRootSections();
     sectionLookup.clear();
     sectionPathLookup.clear();
     sectionParentHeadingLookup.clear();
     blockToSectionId.clear();
-    recomputeNumbering(entryState.sectionsTree);
+    recomputeNumbering(displayTree);
     registerVirtualSections();
-    const container = document.getElementById('entrySections');
-    container.innerHTML = '';
-    const fragment = document.createDocumentFragment();
+    ensureOutlineExpansion(displayTree);
     const activeId = draft.active ? draft.sectionId : null;
-    if (!entryState.sectionsTree.length) {
-      fragment.appendChild(helpMessage('This entry has no sections yet. Use "Add section" to propose the first one.'));
-    } else {
-      const renderNodes = (nodes) => {
-        nodes.forEach((section) => {
-          const nodeEl = document.createElement('div');
-          nodeEl.className = `section-node depth-${section.depth || 1}`;
-          nodeEl.dataset.sectionId = section.id;
-          if (section.id === activeId) {
-            nodeEl.classList.add('section-node-active');
-          }
+    const searchTerm = (outlineState.search || '').trim();
+    const hasFilter = !!searchTerm;
+    const filterState = hasFilter ? computeOutlineFilter(displayTree, searchTerm) : { visible: null, matches: new Set() };
+    entryContainer.innerHTML = '';
+    entryContainer.setAttribute('role', 'tree');
+    entryContainer.setAttribute('aria-multiselectable', 'false');
+    const fragment = document.createDocumentFragment();
+    const renderNodes = (nodes, parent) => {
+      nodes.forEach((section) => {
+        if (!section || !section.id) return;
+        if (hasFilter && (!filterState.visible || !filterState.visible.has(section.id))) {
+          return;
+        }
+        const depth = Math.max(1, section.depth || 1);
+        const nodeEl = document.createElement('div');
+        nodeEl.className = `section-node depth-${depth}`;
+        nodeEl.dataset.sectionId = section.id;
+        nodeEl.setAttribute('role', 'treeitem');
+        nodeEl.setAttribute('aria-level', String(depth));
+        const children = Array.isArray(section.children) ? section.children : [];
+        const hasChildren = children.length > 0;
+        const childVisible = hasChildren && (!hasFilter || children.some((child) => filterState.visible.has(child.id)));
+        const expanded = hasChildren ? (hasFilter ? childVisible : isSectionExpanded(section.id)) : false;
+        nodeEl.setAttribute('aria-expanded', hasChildren ? (expanded ? 'true' : 'false') : 'false');
+        nodeEl.dataset.filterMatch = hasFilter && filterState.matches.has(section.id) ? 'true' : 'false';
+        nodeEl.draggable = !hasFilter;
+        if (section.id === activeId) {
+          nodeEl.classList.add('section-node-active');
+        }
 
-          const header = document.createElement('div');
-          header.className = 'section-header';
+        const header = document.createElement('div');
+        header.className = 'section-header';
 
-          const headerRow = document.createElement('div');
-          headerRow.className = 'section-row';
-          const heading = document.createElement('div');
-          heading.className = 'section-heading';
-          const numberingPrefix = section.numbering ? `${section.numbering} ` : '';
-          const headingSpan = document.createElement('span');
-          headingSpan.className = 'section-heading-text';
-          headingSpan.textContent = `${numberingPrefix}${section.heading || '(untitled section)'}`;
-          heading.appendChild(headingSpan);
-          headerRow.appendChild(heading);
-          const statusChip = document.createElement('span');
-          statusChip.className = 'section-status-chip';
-          statusChip.dataset.sectionStatus = 'idle';
-          statusChip.textContent = '• Idle';
-          statusChip.setAttribute('aria-label', 'Section status: idle');
-          headerRow.appendChild(statusChip);
+        const headerRow = document.createElement('div');
+        headerRow.className = 'section-row';
 
-          const actions = document.createElement('div');
-          actions.className = 'section-actions';
-          const editBtn = document.createElement('button');
-          editBtn.type = 'button';
-          editBtn.className = 'section-edit';
-          editBtn.dataset.sectionId = section.id;
-          editBtn.innerHTML = '<span>Edit</span>';
-          // Direct listener to avoid relying solely on event delegation
-          editBtn.addEventListener('click', function(ev){
-            ev.stopPropagation();
-            window.__gmhStartDraft && window.__gmhStartDraft(section.id);
-          });
-          actions.appendChild(editBtn);
-          if ((section.depth || 1) === 1) {
-            const addBtn = document.createElement('button');
-            addBtn.type = 'button';
-            addBtn.className = 'section-add';
-            addBtn.dataset.sectionId = section.id;
-            addBtn.innerHTML = '<span>Add section below</span>';
-            actions.appendChild(addBtn);
-          }
+        if (hasChildren) {
+          const toggleBtn = document.createElement('button');
+          toggleBtn.type = 'button';
+          toggleBtn.className = 'section-toggle';
+          toggleBtn.dataset.sectionId = section.id;
+          toggleBtn.dataset.expanded = expanded ? 'true' : 'false';
+          if (hasFilter) toggleBtn.disabled = true;
+          const labelText = `${section.numbering ? `${section.numbering} ` : ''}${section.heading || '(untitled section)'}`;
+          toggleBtn.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${labelText}`);
+          toggleBtn.innerHTML = '<span class="toggle-icon">▾</span>';
+          headerRow.appendChild(toggleBtn);
+        } else {
+          const placeholder = document.createElement('span');
+          placeholder.className = 'section-toggle is-placeholder';
+          placeholder.setAttribute('aria-hidden', 'true');
+          placeholder.innerHTML = '<span class="toggle-icon">▾</span>';
+          headerRow.appendChild(placeholder);
+        }
 
-          header.appendChild(headerRow);
-          header.appendChild(actions);
-          nodeEl.appendChild(header);
+        const heading = document.createElement('div');
+        heading.className = 'section-heading';
+        const headingSpan = document.createElement('span');
+        headingSpan.className = 'section-heading-text';
+        const numberingPrefix = section.numbering ? `${section.numbering} ` : '';
+        headingSpan.textContent = `${numberingPrefix}${section.heading || '(untitled section)'}`;
+        heading.appendChild(headingSpan);
+        headerRow.appendChild(heading);
 
-          if (section.body) {
-            const body = document.createElement('div');
-            body.className = 'section-body';
-            body.textContent = section.body;
-            nodeEl.appendChild(body);
-          }
+        const statusChip = document.createElement('span');
+        statusChip.className = 'section-status-chip';
+        statusChip.dataset.sectionStatus = 'idle';
+        statusChip.textContent = '• Idle';
+        statusChip.setAttribute('aria-label', 'Section status: idle');
+        headerRow.appendChild(statusChip);
 
-          fragment.appendChild(nodeEl);
-          if (section.children.length) {
-            renderNodes(section.children);
+        const actions = document.createElement('div');
+        actions.className = 'section-actions';
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'section-edit';
+        editBtn.dataset.sectionId = section.id;
+        editBtn.innerHTML = '<span>Edit</span>';
+        editBtn.addEventListener('click', function(ev) {
+          ev.stopPropagation();
+          if (window.__gmhStartDraft) {
+            window.__gmhStartDraft(section.id);
           }
         });
-      };
-      renderNodes(entryState.sectionsTree);
+        actions.appendChild(editBtn);
+        if ((section.depth || 1) === 1) {
+          const addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'section-add';
+          addBtn.dataset.sectionId = section.id;
+          addBtn.innerHTML = '<span>Add section below</span>';
+          actions.appendChild(addBtn);
+        }
+
+        header.appendChild(headerRow);
+        header.appendChild(actions);
+        nodeEl.appendChild(header);
+
+        if (section.body) {
+          const body = document.createElement('div');
+          body.className = 'section-body';
+          body.textContent = section.body;
+          nodeEl.appendChild(body);
+        }
+
+        if (hasChildren) {
+          const childrenWrap = document.createElement('div');
+          childrenWrap.className = 'section-children';
+          childrenWrap.setAttribute('role', 'group');
+          if (!expanded) {
+            childrenWrap.hidden = true;
+          }
+          nodeEl.appendChild(childrenWrap);
+          renderNodes(children, childrenWrap);
+        }
+
+        parent.appendChild(nodeEl);
+      });
+    };
+
+    if (!displayTree.length) {
+      fragment.appendChild(helpMessage('This entry has no sections yet. Use "Add section" to propose the first one.'));
+    } else {
+      renderNodes(displayTree, fragment);
     }
-    container.appendChild(fragment);
+
+    entryContainer.appendChild(fragment);
+    updateOutlineControlsUI(displayTree);
     ensureFocusedSection();
     highlightFocusedSection();
     updateSectionStatusChips();
@@ -1259,6 +1765,7 @@
     });
     updateAnchorControls();
     updateAnchorHighlight();
+    persistOutlineState();
   }
 
   function startDraft(sectionId) {

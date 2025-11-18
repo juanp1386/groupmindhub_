@@ -53,7 +53,9 @@ Key coverage lives in `groupmindhub/apps/core/tests`, including regression tests
 
 ## Theming notes
 - Theme toggle state persists in `localStorage` (`gmh_theme`).
-- Palette variables are defined in `templates/base.html` and consumed across entry templates.
+- Palette tokens and shared global styles now live in `static/css/global.css`, which all templates import.
+- Entry-specific workspace/layout rules sit in `static/css/entry.css` so mobile/tablet breakpoints stay in one place.
+- The sticky header collapses into an accessible nav toggle under 900 px; the same CSS also stacks workspace panes for narrow viewports.
 - Provide both light and dark logo/favicons (`logo-light.png`, `logo-dark.png`, `favicon-light.png`, `favicon-dark.png`).
 
 ## Troubleshooting

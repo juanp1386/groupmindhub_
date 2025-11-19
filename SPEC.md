@@ -10,7 +10,7 @@
 - Single entry (“Trunk”) per project (seeded on project creation).
 - Project creation form exposes a document-style outline builder with inline heading/body editors so the initial entry mirrors the Workspace document.
 - Section composer supports add/remove/reorder/indent/outdent of subsections and body text updates.
-- Voting (−1/0/+1) with merge gating at 40 % yes votes across the configured pool (`SIM_USER_POOL_SIZE = 5`).
+- Voting (−1/0/+1) with merge gating at each project's configured pool/threshold (defaults: 40 % of 5 simulated voters, 24 h duration).
 - Auto-merge promotes passing changes and snapshots history with before/after outlines.
 - Project discovery via landing page with activity scores and starring.
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 import json
-import math
 from typing import Dict, Any
 import uuid
 from django.http import JsonResponse, HttpRequest
@@ -14,6 +13,13 @@ from .access import resolve_invite
 
 ROOT_SECTION_ID = '__root__'
 DEFAULT_COMMENT_PAGE_SIZE = 20
+
+
+def serialize_project_governance(project: Project) -> Dict[str, Any]:
+    snapshot = project.governance_snapshot()
+    snapshot['approval_threshold'] = round(snapshot['approval_threshold'], 2)
+    snapshot['approval_threshold_percent'] = round(snapshot['approval_threshold_percent'], 2)
+    return snapshot
 
 
 def _resolve_comment_target(project: Project, target_type: str, identifier):
@@ -79,7 +85,6 @@ from .logic import (
     build_section_index,
     SectionIndex,
     is_passing,
-    SIM_USER_POOL_SIZE,
 )
 
 
@@ -199,6 +204,7 @@ def serialize_entry(entry: Entry):
         'blocks': blocks,
         'sections': sections,
         'sections_tree': roots,
+        'project_governance': serialize_project_governance(entry.project),
     }
 
 
@@ -220,7 +226,8 @@ def serialize_change(p: Change, user=None, section_index=None):
     section_index = section_index or build_section_index(p.target_entry)
     section_block_id = _normalize_section_block_id(p.target_section_id)
     section_info = section_index.get_by_heading(section_block_id) if section_block_id else None
-    required_yes = max(1, math.ceil(0.4 * SIM_USER_POOL_SIZE))
+    governance = serialize_project_governance(p.project)
+    required_yes = governance['required_yes_votes']
     author_name = None
     if p.author_id:
         author_name = p.author.get_full_name() or p.author.get_username() or str(p.author_id)
@@ -249,6 +256,8 @@ def serialize_change(p: Change, user=None, section_index=None):
         'current_user_vote': current_vote,
         'required_yes_votes': required_yes,
         'is_passing': is_passing(p),
+        'closes_at': p.closes_at.isoformat() if p.closes_at else None,
+        'project_governance': governance,
         'author_name': author_name or 'Anonymous',
     }
 
@@ -273,7 +282,7 @@ def api_project_changes_list(request: HttpRequest, project_id: int):
         return error
     section_indices: Dict[int, SectionIndex] = {}
     serialized = []
-    for change in project.changes.select_related('target_entry').all():
+    for change in project.changes.select_related('target_entry', 'project').all():
         entry = change.target_entry
         if entry:
             section_index = section_indices.setdefault(entry.id, build_section_index(entry))
@@ -444,7 +453,7 @@ def api_project_changes_create(request: HttpRequest, project_id: int):
         status='published',
         base_entry_version_int=entry.entry_version_int,
         published_at=now,
-        closes_at=now + timezone.timedelta(hours=24),
+        closes_at=now + timezone.timedelta(hours=project.voting_duration_hours or 24),
     )
     # Author auto-upvote (+1)
     Vote.objects.update_or_create(
@@ -582,7 +591,7 @@ def api_change_merge(request: HttpRequest, change_id: int):
         return error
     if patch.status != 'merged':
         if not is_passing(patch):
-            required_yes = max(1, math.ceil(0.4 * SIM_USER_POOL_SIZE))
+            required_yes = patch.project.required_yes_votes if patch.project else 1
             return JsonResponse(
                 {
                     'error': 'change has not reached the merge threshold',

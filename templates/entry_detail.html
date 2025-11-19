@@ -77,6 +77,28 @@
         {% endif %}
       </div>
     </section>
+    <section class="governance-card" aria-label="Project governance">
+      <div class="governance-body">
+        <div>
+          <h2>Voting rules</h2>
+          <p class="muted-small">Auto-merges once {{ project_governance.required_yes_votes }} yes votes ({{ project_governance.approval_threshold_percent }}%) land within {{ project_governance.voting_duration_hours }} hours.</p>
+        </div>
+        <dl>
+          <div>
+            <dt>Pool size</dt>
+            <dd>{{ project_governance.voting_pool_size }}</dd>
+          </div>
+          <div>
+            <dt>Approval threshold</dt>
+            <dd>{{ project_governance.approval_threshold_percent }}%</dd>
+          </div>
+          <div>
+            <dt>Voting window</dt>
+            <dd>{{ project_governance.voting_duration_hours }}h</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
     <div class="workspace-toolbar">
       <div class="pane-title">Workspace</div>
       <div class="controls pane-controls">

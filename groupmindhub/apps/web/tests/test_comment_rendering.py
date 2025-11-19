@@ -40,4 +40,3 @@ class CommentRenderingTests(TestCase):
         activity = response.context['followed_activity']
         self.assertTrue(any('💬' in item['summary'] for item in activity))
         self.assertContains(response, 'Recent feedback note.')
-*** End of File

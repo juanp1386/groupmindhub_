@@ -3,7 +3,7 @@
 Keep this close when extending the app or prompting Copilot.
 
 ## Key concepts
-- Auto-merge threshold: **40 %** of `SIM_USER_POOL_SIZE` (defined in `groupmindhub/apps/core/logic.py`).
+- Auto-merge thresholds + voting windows are stored per-project (`Project.voting_pool_size`, `approval_threshold`, `voting_duration_hours`) and surfaced through the entry JSON for the client.
 - Change ops: `UPDATE_TEXT`, `INSERT_BLOCK`, `DELETE_BLOCK`, `MOVE_BLOCK` (mirrors prototype semantics).
 - Section scope drives validation — all ops/anchors must stay within the targeted section tree.
 - Theme toggle + palette variables live in `templates/entry_detail.html` and are reused via CSS custom properties.

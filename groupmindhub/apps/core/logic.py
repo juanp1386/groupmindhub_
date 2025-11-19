@@ -10,9 +10,6 @@ from typing import Dict, Iterable, List, Any
 from django.utils import timezone
 from .models import Block, Change, Entry, Vote, EntryHistory
 
-# Simulated user pool size (used for merge threshold calculation) mirrors UI prototype (5 users)
-SIM_USER_POOL_SIZE = 5
-
 
 @dataclass
 class SectionInfo:
@@ -199,20 +196,17 @@ def recompute_patch_votes_cache(patch: Change):
 
 
 def is_passing(patch: Change) -> bool:
-    """A patch passes when yes votes reach 40% of the (simulated) total user pool.
+    """A patch passes when yes votes meet the project's configured approval threshold."""
 
-    Using a fixed pool size prevents a single initial upvote (author auto‑vote) from
-    immediately merging the patch (previous logic used yes/(yes+no)).
-    """
     yes = Vote.objects.filter(target_type='change', target_id=patch.id, value__gt=0).count()
-    # Require at least ceil(0.4 * SIM_USER_POOL_SIZE) yes votes
-    required = max(1, int((0.4 * SIM_USER_POOL_SIZE) + 0.000001))  # avoid float quirks
+    project = patch.project
+    required = project.required_yes_votes if project else 1
     return yes >= required
 
 
 def auto_merge():
     """Merge all passing, non-merged, published changes."""
-    candidates = Change.objects.filter(status='published')
+    candidates = Change.objects.filter(status='published').select_related('project')
     for p in candidates:
         if is_passing(p):
             apply_merge_core(p)

@@ -18,13 +18,14 @@ from groupmindhub.apps.core.models import (
     ProjectMembership,
     ProjectInvite,
     Comment,
+    GovernanceProposal,
 )
 from groupmindhub.apps.core.api import serialize_entry
 from django.http import HttpResponse, HttpResponseForbidden
 from django.core.exceptions import PermissionDenied
 from pathlib import Path
 
-from .forms import ProjectInviteForm
+from .forms import ProjectInviteForm, ProjectGovernanceForm
 from groupmindhub.apps.core.access import resolve_invite, forget_invite
 from django.utils.text import Truncator
 
@@ -68,6 +69,7 @@ def index(request):
 @login_required
 def project_new(request):
     """Project creation with section builder (heading + body)."""
+    governance_form = ProjectGovernanceForm(request.POST or None)
     if request.method == 'POST':
         name = request.POST.get('name','').strip()
         desc = request.POST.get('description','').strip()
@@ -75,8 +77,15 @@ def project_new(request):
         if visibility not in Project.Visibility.values:
             visibility = Project.Visibility.PUBLIC
         sections_json = request.POST.get('sections_json','').strip()
-        if name:
-            project = Project.objects.create(name=name, description=desc, visibility=visibility)
+        if name and governance_form.is_valid():
+            project = Project.objects.create(
+                name=name,
+                description=desc,
+                visibility=visibility,
+                voting_pool_size=governance_form.cleaned_data['voting_pool_size'],
+                approval_threshold=governance_form.cleaned_data['approval_threshold'],
+                voting_duration_hours=governance_form.cleaned_data['voting_duration_hours'],
+            )
             project.add_member(request.user, ProjectMembership.Role.OWNER)
             entry = Entry.objects.create(project=project, title='Trunk', author=request.user, status='published')
             seed_invites_raw = request.POST.get('invite_emails', '').strip()
@@ -171,7 +180,7 @@ def project_new(request):
             build(sections_tree)
 
             return redirect('project_detail', project_id=project.id)
-    return render(request, 'project_new.html')
+    return render(request, 'project_new.html', {'governance_form': governance_form})
 
 
 from django.views.decorators.http import require_POST
@@ -241,6 +250,13 @@ def project_settings(request, project_id: int):
     project = get_object_or_404(Project, id=project_id)
     project.require_role(request.user, ProjectMembership.Role.OWNER)
     invite_form = ProjectInviteForm()
+    governance_form = ProjectGovernanceForm(
+        initial={
+            'voting_pool_size': project.voting_pool_size,
+            'approval_threshold': project.approval_threshold,
+            'voting_duration_hours': project.voting_duration_hours,
+        }
+    )
     if request.method == 'POST':
         action = request.POST.get('action') or ''
         if action == 'invite':
@@ -277,6 +293,46 @@ def project_settings(request, project_id: int):
                 project.save(update_fields=['visibility'])
                 messages.success(request, 'Project visibility updated.')
                 return redirect('project_settings', project_id=project.id)
+        elif action == 'governance':
+            governance_form = ProjectGovernanceForm(request.POST)
+            if governance_form.is_valid():
+                cleaned = governance_form.cleaned_data
+                has_change = (
+                    cleaned['voting_pool_size'] != project.voting_pool_size
+                    or cleaned['approval_threshold'] != project.approval_threshold
+                    or cleaned['voting_duration_hours'] != project.voting_duration_hours
+                )
+                if not has_change:
+                    messages.info(request, 'Governance settings already match these values.')
+                else:
+                    proposal = GovernanceProposal.objects.create(
+                        project=project,
+                        created_by=request.user,
+                        summary=(request.POST.get('governance_summary') or '').strip(),
+                        voting_pool_size=cleaned['voting_pool_size'],
+                        approval_threshold=cleaned['approval_threshold'],
+                        voting_duration_hours=cleaned['voting_duration_hours'],
+                    )
+                    proposal.initialize_approvals(auto_approve_user=request.user)
+                    messages.success(request, 'Governance change proposed for owner approval.')
+                return redirect('project_settings', project_id=project.id)
+        elif action in {'governance-approve', 'governance-reject'}:
+            proposal_id = request.POST.get('proposal_id')
+            proposal = get_object_or_404(GovernanceProposal, id=proposal_id, project=project)
+            approval = proposal.approvals.select_related('membership__user').filter(
+                membership__project=project,
+                membership__user=request.user,
+            ).first()
+            if not approval:
+                messages.error(request, 'You do not have an approval to update for this proposal.')
+            else:
+                if action == 'governance-approve':
+                    approval.approve()
+                    messages.success(request, 'You approved the governance change proposal.')
+                else:
+                    approval.reject()
+                    messages.info(request, 'You rejected the governance change proposal.')
+            return redirect('project_settings', project_id=project.id)
 
     active_invites = list(project.invites.filter(accepted_at__isnull=True, declined_at__isnull=True).order_by('email'))
     invite_rows = []
@@ -289,6 +345,14 @@ def project_settings(request, project_id: int):
         })
 
     memberships = project.memberships.select_related('user').order_by('-role', 'user__username')
+    governance_proposals = list(
+        project.governance_proposals.prefetch_related('approvals__membership__user').order_by('-created_at')
+    )
+    for proposal in governance_proposals:
+        proposal.user_approval = next(
+            (approval for approval in proposal.approvals.all() if approval.membership.user_id == request.user.id),
+            None,
+        )
 
     return render(request, 'project_settings.html', {
         'project': project,
@@ -296,6 +360,8 @@ def project_settings(request, project_id: int):
         'invite_rows': invite_rows,
         'invite_form': invite_form,
         'visibility_choices': Project.Visibility.choices,
+        'governance_form': governance_form,
+        'governance_proposals': governance_proposals,
     })
 
 
@@ -354,6 +420,7 @@ def entry_detail(request, entry_id: int):
             'blocks': blocks,
             'sections': [],
         }
+    entry_json['project_governance'] = entry.project.governance_snapshot()
 
     display_name = request.user.get_full_name() or request.user.get_username()
     user_payload = {
@@ -373,6 +440,7 @@ def entry_detail(request, entry_id: int):
         'entry_sections_tree': entry_json.get('sections_tree') or [],
         'project_membership': membership,
         'user_payload': user_payload,
+        'project_governance': entry.project.governance_snapshot(),
     })
 
 
@@ -428,7 +496,10 @@ def updates(request):
             section_label = _section_label_for_change(change)
             if not matches_filters(project_name, section_label):
                 continue
-            closes_at = change.published_at + timedelta(hours=24) if change.published_at else None
+            closes_at = change.closes_at
+            if not closes_at and change.published_at:
+                duration = change.project.voting_duration_hours if change.project_id else 24
+                closes_at = change.published_at + timedelta(hours=duration)
             delta = closes_at - now if closes_at else None
             open_votings.append({
                 'id': change.id,

@@ -1,6 +1,8 @@
 import json
+from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
+from django.utils import timezone
 from groupmindhub.apps.core.models import (
     Block,
     Change,
@@ -140,3 +142,31 @@ class ChangeApiTests(TestCase):
         signed = invite.get_signed_token()
         response = client.get(f'/api/projects/{private.id}/entry?invite={signed}')
         self.assertEqual(response.status_code, 200)
+
+    def test_required_yes_votes_follow_project_settings(self):
+        self.project.voting_pool_size = 10
+        self.project.approval_threshold = Decimal('0.60')
+        self.project.voting_duration_hours = 36
+        self.project.save(update_fields=['voting_pool_size', 'approval_threshold', 'voting_duration_hours'])
+        payload = {
+            'entry_id': self.entry.id,
+            'section_id': 'root',
+            'summary': 'Threshold test',
+            'ops_json': [],
+            'affected_blocks': [],
+            'anchors': [],
+        }
+        response = self.client.post(
+            f'/api/projects/{self.project.id}/changes/create',
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        body = json.loads(response.content)
+        change_data = body['change']
+        self.assertEqual(change_data['required_yes_votes'], 6)
+        self.assertEqual(change_data['project_governance']['voting_duration_hours'], 36)
+        change = Change.objects.get(project=self.project)
+        self.assertIsNotNone(change.closes_at)
+        expected_close = change.published_at + timezone.timedelta(hours=36)
+        self.assertEqual(change.closes_at, expected_close)

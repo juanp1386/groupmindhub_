@@ -1,7 +1,16 @@
 from __future__ import annotations
+import math
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
+from django.utils import timezone
+
+
+DEFAULT_VOTING_POOL_SIZE = 5
+DEFAULT_APPROVAL_THRESHOLD = Decimal('0.40')
+DEFAULT_VOTING_DURATION_HOURS = 24
 
 
 class Project(models.Model):
@@ -17,6 +26,13 @@ class Project(models.Model):
         choices=Visibility.choices,
         default=Visibility.PUBLIC,
     )
+    voting_pool_size = models.PositiveIntegerField(default=DEFAULT_VOTING_POOL_SIZE)
+    approval_threshold = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+        default=DEFAULT_APPROVAL_THRESHOLD,
+    )
+    voting_duration_hours = models.PositiveIntegerField(default=DEFAULT_VOTING_DURATION_HOURS)
 
     def __str__(self):
         return self.name
@@ -52,6 +68,30 @@ class Project(models.Model):
         if role == ProjectMembership.Role.VIEWER and self.visibility == self.Visibility.PUBLIC:
             return membership
         raise PermissionDenied("You do not have access to this project.")
+
+    @property
+    def required_yes_votes(self) -> int:
+        pool = max(1, self.voting_pool_size or DEFAULT_VOTING_POOL_SIZE)
+        threshold = self.approval_threshold or DEFAULT_APPROVAL_THRESHOLD
+        try:
+            threshold_float = float(threshold)
+        except (TypeError, ValueError):
+            threshold_float = float(DEFAULT_APPROVAL_THRESHOLD)
+        return max(1, math.ceil(threshold_float * pool))
+
+    def governance_snapshot(self) -> dict:
+        threshold = self.approval_threshold or DEFAULT_APPROVAL_THRESHOLD
+        try:
+            threshold_float = float(threshold)
+        except (TypeError, ValueError):
+            threshold_float = float(DEFAULT_APPROVAL_THRESHOLD)
+        return {
+            'voting_pool_size': self.voting_pool_size,
+            'approval_threshold': threshold_float,
+            'approval_threshold_percent': round(threshold_float * 100, 2),
+            'voting_duration_hours': self.voting_duration_hours,
+            'required_yes_votes': self.required_yes_votes,
+        }
 
 
 class Entry(models.Model):
@@ -301,6 +341,120 @@ class ProjectInvite(models.Model):
         if not self.token:
             self.token = self.generate_token()
         super().save(*args, **kwargs)
+
+
+class GovernanceProposal(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    project = models.ForeignKey(Project, related_name='governance_proposals', on_delete=models.CASCADE)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name='governance_proposals',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    summary = models.CharField(max_length=200, blank=True)
+    voting_pool_size = models.PositiveIntegerField()
+    approval_threshold = models.DecimalField(max_digits=4, decimal_places=2)
+    voting_duration_hours = models.PositiveIntegerField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f"GovernanceProposal(project={self.project_id}, status={self.status})"
+
+    def initialize_approvals(self, auto_approve_user=None):
+        owners = self.project.memberships.filter(role=ProjectMembership.Role.OWNER)
+        approvals = []
+        for membership in owners:
+            approval, _ = GovernanceApproval.objects.get_or_create(
+                proposal=self,
+                membership=membership,
+            )
+            approvals.append((approval, membership))
+
+        auto_user_id = getattr(auto_approve_user, 'id', None)
+        if auto_user_id:
+            for approval, membership in approvals:
+                if membership.user_id == auto_user_id:
+                    approval.approve()
+        self.refresh_from_db()
+        self.update_status_from_approvals()
+
+    def update_status_from_approvals(self):
+        approvals = list(self.approvals.all())
+        if not approvals:
+            self.apply_to_project()
+            if self.status != self.Status.APPROVED:
+                self.status = self.Status.APPROVED
+                self.decided_at = timezone.now()
+                self.save(update_fields=['status', 'decided_at'])
+            return
+        if any(approval.decision == GovernanceApproval.Decision.REJECTED for approval in approvals):
+            if self.status != self.Status.REJECTED:
+                self.status = self.Status.REJECTED
+                self.decided_at = timezone.now()
+                self.save(update_fields=['status', 'decided_at'])
+            return
+        if all(approval.decision == GovernanceApproval.Decision.APPROVED for approval in approvals):
+            if self.status != self.Status.APPROVED:
+                self.apply_to_project()
+                self.status = self.Status.APPROVED
+                self.decided_at = timezone.now()
+                self.save(update_fields=['status', 'decided_at'])
+            return
+        if self.status != self.Status.PENDING:
+            self.status = self.Status.PENDING
+            self.decided_at = None
+            self.save(update_fields=['status', 'decided_at'])
+
+    def apply_to_project(self):
+        self.project.voting_pool_size = self.voting_pool_size
+        self.project.approval_threshold = self.approval_threshold
+        self.project.voting_duration_hours = self.voting_duration_hours
+        self.project.save(update_fields=['voting_pool_size', 'approval_threshold', 'voting_duration_hours'])
+
+
+class GovernanceApproval(models.Model):
+    class Decision(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    proposal = models.ForeignKey(GovernanceProposal, related_name='approvals', on_delete=models.CASCADE)
+    membership = models.ForeignKey(ProjectMembership, related_name='governance_approvals', on_delete=models.CASCADE)
+    decision = models.CharField(max_length=20, choices=Decision.choices, default=Decision.PENDING)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('proposal', 'membership')
+
+    def __str__(self):
+        return f"GovernanceApproval(proposal={self.proposal_id}, membership={self.membership_id}, decision={self.decision})"
+
+    def approve(self):
+        if self.decision == self.Decision.APPROVED:
+            return
+        self.decision = self.Decision.APPROVED
+        self.decided_at = timezone.now()
+        self.save(update_fields=['decision', 'decided_at'])
+        self.proposal.update_status_from_approvals()
+
+    def reject(self):
+        if self.decision == self.Decision.REJECTED:
+            return
+        self.decision = self.Decision.REJECTED
+        self.decided_at = timezone.now()
+        self.save(update_fields=['decision', 'decided_at'])
+        self.proposal.update_status_from_approvals()
 
 
 class Comment(models.Model):

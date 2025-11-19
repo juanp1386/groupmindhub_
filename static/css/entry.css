@@ -28,6 +28,44 @@
   line-height: 1.55;
 }
 
+.governance-card {
+  margin: 0 24px 24px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px 24px;
+  background: var(--panel-soft);
+  box-shadow: 0 12px 30px var(--shadow-soft);
+}
+
+.governance-body {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.governance-card dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.governance-card dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.governance-card dd {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .workspace-toolbar {
   display: flex;
   align-items: center;

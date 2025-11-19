@@ -12,11 +12,11 @@
     <section class="project-card">
       <div class="field">
         <label for="projectName">Project name</label>
-        <input id="projectName" name="name" required placeholder="e.g., Community Garden Bylaws" />
+        <input id="projectName" name="name" required placeholder="e.g., Community Garden Bylaws" value="{{ request.POST.name|default:'' }}" />
       </div>
       <div class="field">
         <label for="projectDescription">Short description</label>
-        <textarea id="projectDescription" name="description" rows="3" placeholder="What is this project about?"></textarea>
+        <textarea id="projectDescription" name="description" rows="3" placeholder="What is this project about?">{{ request.POST.description|default:'' }}</textarea>
       </div>
       <div class="field">
         <label for="projectVisibility">Visibility</label>
@@ -27,7 +27,7 @@
       </div>
       <div class="field">
         <label for="projectInvites">Invite teammates</label>
-        <textarea id="projectInvites" name="invite_emails" rows="3" placeholder="Add email addresses, one per line"></textarea>
+        <textarea id="projectInvites" name="invite_emails" rows="3" placeholder="Add email addresses, one per line">{{ request.POST.invite_emails|default:'' }}</textarea>
         <small class="muted">We’ll generate shareable invite links and send them from the settings page.</small>
       </div>
       <div class="field">
@@ -36,6 +36,44 @@
           <option value="viewer" selected>Viewer</option>
           <option value="editor">Editor</option>
         </select>
+      </div>
+      <div class="field-set">
+        <div class="field">
+          <h3>Governance</h3>
+          <p class="muted">Define how proposals are evaluated. Defaults can be adjusted later from Settings.</p>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            {{ governance_form.voting_pool_size.label_tag }}
+            {{ governance_form.voting_pool_size }}
+            {% if governance_form.voting_pool_size.help_text %}
+            <small class="muted">{{ governance_form.voting_pool_size.help_text }}</small>
+            {% endif %}
+            {% if governance_form.voting_pool_size.errors %}
+            <div class="form-error">{{ governance_form.voting_pool_size.errors|join:', ' }}</div>
+            {% endif %}
+          </div>
+          <div class="field">
+            {{ governance_form.approval_threshold.label_tag }}
+            {{ governance_form.approval_threshold }}
+            {% if governance_form.approval_threshold.help_text %}
+            <small class="muted">{{ governance_form.approval_threshold.help_text }}</small>
+            {% endif %}
+            {% if governance_form.approval_threshold.errors %}
+            <div class="form-error">{{ governance_form.approval_threshold.errors|join:', ' }}</div>
+            {% endif %}
+          </div>
+          <div class="field">
+            {{ governance_form.voting_duration_hours.label_tag }}
+            {{ governance_form.voting_duration_hours }}
+            {% if governance_form.voting_duration_hours.help_text %}
+            <small class="muted">{{ governance_form.voting_duration_hours.help_text }}</small>
+            {% endif %}
+            {% if governance_form.voting_duration_hours.errors %}
+            <div class="form-error">{{ governance_form.voting_duration_hours.errors|join:', ' }}</div>
+            {% endif %}
+          </div>
+        </div>
       </div>
     </section>
     <section class="project-doc">
@@ -216,6 +254,12 @@
 .project-card{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:24px 28px;box-shadow:0 18px 42px var(--shadow);background-image:var(--grain-pattern);background-blend-mode:overlay;}
 .project-card .field{display:flex;flex-direction:column;gap:6px;margin-top:18px;}
 .project-card .field:first-of-type{margin-top:0;}
+.project-card .field-set{margin-top:24px;padding-top:18px;border-top:1px solid rgba(var(--accent-rgb),0.2);}
+.project-card .field-set h3{margin:0;font-size:16px;}
+.project-card .field-set p{margin:6px 0 0;font-size:13px;}
+.field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:18px;margin-top:12px;}
+.governance-input{width:100%;background:transparent;border-radius:12px;padding:10px 12px;border:1px solid rgba(var(--accent-rgb),0.3);}
+.governance-input:focus{border-color:rgba(var(--accent-rgb),0.6);outline:0;}
 .project-card label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
 .project-card input,
 .project-card textarea{width:100%;background:transparent;border-radius:12px;padding:12px 14px;border:1px solid rgba(var(--accent-rgb),0.3);}

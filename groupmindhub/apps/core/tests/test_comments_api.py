@@ -114,4 +114,3 @@ class CommentApiTests(TestCase):
         data = response.json()
         self.assertEqual(data['results'][0]['target_type'], 'change')
         self.assertEqual(str(data['results'][0]['target_id']), str(change.id))
-*** End of File

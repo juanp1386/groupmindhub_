@@ -65,6 +65,7 @@
     votes: parsedEntry && parsedEntry.votes ? parsedEntry.votes : 0,
     blocks: deepClone((parsedEntry && parsedEntry.blocks) || []),
     sectionsTree: ((parsedEntry && parsedEntry.sections_tree) || []).map((section) => normalizeSection(section)),
+    governance: (parsedEntry && parsedEntry.project_governance) || null,
   };
   try { console.log('[GMH] sectionsTree size:', (entryState.sectionsTree||[]).length); } catch(e) {}
 
@@ -825,12 +826,22 @@
     persistWorkspaceLayout();
   }
 
-  function saveTimerSeed(changeId) {
-    if (!workspaceState.timers.has(changeId)) {
-      // Use a 24h countdown window for proposal decisions
-      const base = Date.now() + 24 * 60 * 60 * 1000;
-      workspaceState.timers.set(changeId, base);
+  function saveTimerSeed(change) {
+    if (!change || !change.id) return;
+    const key = String(change.id);
+    if (workspaceState.timers.has(key)) return;
+    let expiresAt = null;
+    if (change.closes_at) {
+      const parsed = Date.parse(change.closes_at);
+      if (!Number.isNaN(parsed)) {
+        expiresAt = parsed;
+      }
     }
+    if (!expiresAt) {
+      const durationHours = (entryState.governance && Number(entryState.governance.voting_duration_hours)) || 24;
+      expiresAt = Date.now() + durationHours * 60 * 60 * 1000;
+    }
+    workspaceState.timers.set(key, expiresAt);
   }
 
   loadWorkspaceLayout();
@@ -1525,7 +1536,7 @@
           rootStartProposals.push(change);
         }
       }
-      saveTimerSeed(String(change.id));
+      saveTimerSeed(change);
     });
     changeState.buckets = buckets;
     changeState.history = history;
@@ -1581,7 +1592,7 @@
     const yes = change.yes || 0;
     const no = change.no || 0;
     const score = yes - no;
-    const requiredYes = change.required_yes_votes || 0;
+    const requiredYes = change.required_yes_votes || (entryState.governance && entryState.governance.required_yes_votes) || 0;
     const totalVotes = yes + no;
     const approvalPct = totalVotes ? Math.round((yes / totalVotes) * 100) : 0;
     const timerId = `change-${change.id}`;

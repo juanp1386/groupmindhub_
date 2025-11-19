@@ -10,6 +10,103 @@
   </header>
 
   <section class="settings-card">
+    <h2>Governance</h2>
+    <form method="post" class="governance-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="governance" />
+      <div class="field-grid">
+        <div class="field">
+          {{ governance_form.voting_pool_size.label_tag }}
+          {{ governance_form.voting_pool_size }}
+          <small class="muted">{{ governance_form.voting_pool_size.help_text }}</small>
+          {% if governance_form.voting_pool_size.errors %}
+          <div class="form-error">{{ governance_form.voting_pool_size.errors|join:', ' }}</div>
+          {% endif %}
+        </div>
+        <div class="field">
+          {{ governance_form.approval_threshold.label_tag }}
+          {{ governance_form.approval_threshold }}
+          <small class="muted">{{ governance_form.approval_threshold.help_text }}</small>
+          {% if governance_form.approval_threshold.errors %}
+          <div class="form-error">{{ governance_form.approval_threshold.errors|join:', ' }}</div>
+          {% endif %}
+        </div>
+        <div class="field">
+          {{ governance_form.voting_duration_hours.label_tag }}
+          {{ governance_form.voting_duration_hours }}
+          <small class="muted">{{ governance_form.voting_duration_hours.help_text }}</small>
+          {% if governance_form.voting_duration_hours.errors %}
+          <div class="form-error">{{ governance_form.voting_duration_hours.errors|join:', ' }}</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="field">
+        <label for="governanceSummary">Proposal summary (optional)</label>
+        <input id="governanceSummary" name="governance_summary" placeholder="Describe why this change is needed" />
+      </div>
+      <button class="primary">Propose update</button>
+    </form>
+    <p class="muted small">Current rules: {{ project.voting_pool_size }} voters · {{ project.required_yes_votes }} yes votes ({{ project.approval_threshold|floatformat:2 }} fraction) · {{ project.voting_duration_hours }}h voting window.</p>
+  </section>
+
+  {% if governance_proposals %}
+  <section class="settings-card">
+    <h2>Governance proposals</h2>
+    <ul class="proposal-list">
+      {% for proposal in governance_proposals %}
+      <li class="proposal-item" data-status="{{ proposal.status }}">
+        <div class="proposal-head">
+          <strong>Proposed {{ proposal.created_at|date:'M j, Y' }}</strong>
+          <span class="pill">{{ proposal.get_status_display }}</span>
+        </div>
+        {% if proposal.summary %}
+        <p class="muted">{{ proposal.summary }}</p>
+        {% endif %}
+        <dl class="proposal-grid">
+          <div>
+            <dt>Pool size</dt>
+            <dd>{{ proposal.voting_pool_size }}</dd>
+          </div>
+          <div>
+            <dt>Approval threshold</dt>
+            <dd>{{ proposal.approval_threshold|floatformat:2 }}</dd>
+          </div>
+          <div>
+            <dt>Voting duration</dt>
+            <dd>{{ proposal.voting_duration_hours }}h</dd>
+          </div>
+        </dl>
+        <div class="approval-list">
+          {% for approval in proposal.approvals.all %}
+          <div class="approval-row">
+            <strong>{{ approval.membership.user.get_full_name|default:approval.membership.user.username }}</strong>
+            <span>{{ approval.get_decision_display }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% if proposal.status == 'pending' and proposal.user_approval and proposal.user_approval.decision == 'pending' %}
+        <div class="proposal-actions">
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="governance-approve" />
+            <input type="hidden" name="proposal_id" value="{{ proposal.id }}" />
+            <button class="primary">Approve</button>
+          </form>
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="governance-reject" />
+            <input type="hidden" name="proposal_id" value="{{ proposal.id }}" />
+            <button class="ghost">Reject</button>
+          </form>
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="settings-card">
     <h2>Visibility</h2>
     <form method="post" class="settings-form">
       {% csrf_token %}
@@ -101,6 +198,18 @@
   .settings-card h2{margin:0 0 16px;font-size:20px;}
   .settings-form,.invite-form{display:flex;flex-direction:column;gap:12px;max-width:420px;}
   .settings-form select,.invite-form input,.invite-form select{max-width:260px;}
+  .governance-form{display:flex;flex-direction:column;gap:18px;}
+  .field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:18px;}
+  .governance-form .field input,.governance-form .field select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(var(--accent-rgb),0.3);background:transparent;}
+  .proposal-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px;}
+  .proposal-item{border:1px solid var(--border);border-radius:16px;padding:16px;background:var(--panel-soft);}
+  .proposal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .proposal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0;}
+  .proposal-grid dt{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+  .proposal-grid dd{margin:4px 0 0;font-weight:600;}
+  .approval-list{display:flex;flex-direction:column;gap:6px;}
+  .approval-row{display:flex;justify-content:space-between;font-size:13px;}
+  .proposal-actions{display:flex;gap:12px;margin-top:12px;}
   .invite-form .field-row{display:flex;flex-direction:column;gap:6px;}
   .settings-table{width:100%;border-collapse:collapse;margin-top:18px;}
   .settings-table th,.settings-table td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);}

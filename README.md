@@ -95,3 +95,5 @@ If you deploy via Heroku Git, ensure you have a `heroku` git remote and push `ma
 - `SPEC.md` – product spec (current behavior + clearly marked spec-only sections).
 - `AI_CONTEXT.md` – code-map and extension notes for contributors/agents.
 - `docs/local_testing_plan.md` – local smoke tests + mapping to the existing Playwright suite.
+
+- `harness/README.md` – lightweight checkpoint/test/screenshot harness for controlled agent work.

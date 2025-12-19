@@ -1,0 +1,27 @@
+project_name = "GroupMindHub"
+base_url = "http://127.0.0.1:8000"
+
+[auth]
+# Used by screenshot capture. For Playwright E2E tests, set E2E_USER/E2E_PASS.
+username = "e2e"
+password = "e2e-pass"
+
+[harness]
+# If true, the harness prompts for feedback at checkpoints that set prompt = true.
+interactive = true
+
+[[checkpoints]]
+id = "backend_tests"
+title = "Backend unit tests"
+commands = ["python manage.py test"]
+prompt = false
+
+[[checkpoints]]
+id = "e2e_smoke"
+title = "E2E smoke"
+commands = ["npm run test:e2e -- e2e/01_stars.spec.ts"]
+# Capture screenshots for quick UI review (not pixel-diffed by default).
+screenshots = ["/", "/updates/", "/projects/new/"]
+# Ask for feedback after this checkpoint.
+prompt = true
+

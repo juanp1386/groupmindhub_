@@ -7,7 +7,10 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "mcp:playwright": "node mcp-playwright/server.mjs"
+    "mcp:playwright": "node mcp-playwright/server.mjs",
+    "harness:status": "python harness/agent_harness.py status",
+    "harness:run": "python harness/agent_harness.py run",
+    "harness:run:skip": "python harness/agent_harness.py run --skip-approved"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",

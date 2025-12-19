@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { createProject } from './utils';
 
 test('Index reflects stars for simulated user', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { createProject } from './utils';
 
 test('Maximize hides other panes and expands target', async ({ page }) => {

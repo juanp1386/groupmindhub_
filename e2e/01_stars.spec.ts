@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { primeSimUser, createProject } from './utils';
 
 test('Star toggle works on homepage', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test('Top-level section proposals skip keep-as-is and land in candidate pool', async ({ page }) => {
   await page.goto('/projects/new/');

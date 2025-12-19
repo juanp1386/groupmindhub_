@@ -1,0 +1,40 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pyi
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+.venv/
+venv/
+ENV/
+
+# Django
+*.sqlite3
+staticfiles/
+media/
+local_settings.py
+
+# Node
+node_modules/
+
+# Playwright
+/test-results/
+/playwright-report/
+
+# Logs / runtime files
+*.log
+*.pid
+
+# IDEs
+.vscode/
+.idea/

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test('Theme toggle persists and swaps favicon', async ({ page }) => {
   await page.goto('/');

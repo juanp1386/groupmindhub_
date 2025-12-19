@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { primeSimUser, createProject, ensureBaseSection, switchSimUser } from './utils';
 
 test('Overlapping proposal is marked needs refresh after a merge', async ({ page }) => {

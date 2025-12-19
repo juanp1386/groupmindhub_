@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { primeSimUser, createProject, ensureBaseSection, switchSimUser } from './utils';
 
 test('Manual merge is blocked until threshold, then succeeds', async ({ page }) => {

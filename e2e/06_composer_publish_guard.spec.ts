@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { createProject, ensureBaseSection } from './utils';
 
 test('Composer blocks publish when no changes exist', async ({ page }) => {

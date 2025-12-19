@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { primeSimUser, createProject, ensureBaseSection } from './utils';
 
 test('Candidate card shows correct required yes votes', async ({ page }) => {

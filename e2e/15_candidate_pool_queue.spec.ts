@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { primeSimUser, createProject, ensureBaseSection } from './utils';
 
 test('Candidate pool shows top 3, extras go to queue', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { primeSimUser, createProject, ensureBaseSection } from './utils';
 
 test('Updates Diff deep-link opens entry with focused candidate diff', async ({ page }) => {

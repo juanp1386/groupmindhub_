@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 async function setSimUser(page, user: string) {
   await page.addInitScript((u) => {
